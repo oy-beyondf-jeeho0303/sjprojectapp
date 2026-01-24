@@ -1,23 +1,28 @@
-// lib/five_elements.dart
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'dart:math';
+import 'package:sj_project_app/utils/localization_data.dart';
 
-// 오행 생극도 위젯
 class FiveElementsDiagram extends StatelessWidget {
   final Map<String, dynamic>? elementRun;
   final String? dayMasterElement;
+  final String targetLanguage;
 
   const FiveElementsDiagram({
     super.key,
-    this.elementRun,
-    this.dayMasterElement,
+    required this.elementRun,
+    required this.dayMasterElement,
+    required this.targetLanguage,
   });
 
   @override
   Widget build(BuildContext context) {
+    // 데이터 없으면 0으로 초기화
     final data = elementRun ?? {'목': 0, '화': 0, '토': 0, '금': 0, '수': 0};
+
+    // 로직용 순서 (고정)
     final List<String> standardOrder = ['목', '화', '토', '금', '수'];
 
+    // 1. 일간을 맨 위(12시 방향)로 보내기 위한 회전 로직
     List<String> rotatedOrder = [];
     if (dayMasterElement != null && standardOrder.contains(dayMasterElement)) {
       int startIndex = standardOrder.indexOf(dayMasterElement!);
@@ -29,14 +34,23 @@ class FiveElementsDiagram extends StatelessWidget {
       rotatedOrder = standardOrder;
     }
 
+    // 2. 화면 표시용 데이터 변환
     final List<Map<String, dynamic>> displayElements = rotatedOrder.map((key) {
+      String isoKey = _getIsoKey(key);
+      String translatedName = AppLocale.get(targetLanguage, isoKey);
+
       return {
-        'name': key,
+        'key': key,
+        'name': translatedName,
         'color': _getElementColor(key),
-        'value': data[key],
+        'value': data[key], // 여기서는 값 그대로 전달 (int or double)
         'isDayMaster': key == dayMasterElement,
       };
     }).toList();
+
+    // 3. 일간 이름 번역
+    String dayMasterKey = _getIsoKey(dayMasterElement ?? "");
+    String dayMasterName = AppLocale.get(targetLanguage, dayMasterKey);
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -45,70 +59,50 @@ class FiveElementsDiagram extends StatelessWidget {
         borderRadius: BorderRadius.circular(25),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 15,
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
             offset: const Offset(0, 5),
           ),
         ],
       ),
       child: Column(
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          // ★ [수정] 헤더 레이아웃: Row 대신 Column + Wrap 사용으로 넘침 방지
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                "기준: ${dayMasterElement ?? '목'} 일간",
+                AppLocale.get(targetLanguage, 'diagram_standard',
+                    params: {'elem': dayMasterName}),
                 style: const TextStyle(
-                  fontWeight: FontWeight.bold,
                   fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF2D3436),
                 ),
               ),
+              const SizedBox(height: 8),
               Row(
+                mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  _buildLegend(Colors.blue, "생(生)"),
-                  const SizedBox(width: 15),
-                  _buildLegend(Colors.red, "극(剋)"),
+                  _buildLegendItem(
+                      AppLocale.get(targetLanguage, 'diagram_saeng'),
+                      Colors.blue),
+                  const SizedBox(width: 12),
+                  _buildLegendItem(
+                      AppLocale.get(targetLanguage, 'diagram_geuk'),
+                      Colors.redAccent),
                 ],
               ),
             ],
           ),
           const SizedBox(height: 20),
-          AspectRatio(
-            aspectRatio: 1,
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final double size = constraints.maxWidth;
-                final double layoutRadius = size / 2.8;
-                final double center = size / 2;
-                final double nodeSize = 70.0;
 
-                return Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    CustomPaint(
-                      size: Size(size, size),
-                      painter: FiveElementsPainter(
-                        layoutRadius: layoutRadius,
-                        nodeRadius: nodeSize / 2,
-                      ),
-                    ),
-                    ...List.generate(displayElements.length, (index) {
-                      final double angle = (index * 72 - 90) * (math.pi / 180);
-                      final double x = center + layoutRadius * math.cos(angle);
-                      final double y = center + layoutRadius * math.sin(angle);
-
-                      return Positioned(
-                        left: x - nodeSize / 2,
-                        top: y - nodeSize / 2,
-                        child: _buildElementNode(
-                          displayElements[index],
-                          nodeSize,
-                        ),
-                      );
-                    }),
-                  ],
-                );
-              },
+          // 다이어그램 영역
+          SizedBox(
+            height: 300,
+            width: double.infinity,
+            child: CustomPaint(
+              painter: _PentagonPainter(displayElements),
             ),
           ),
         ],
@@ -116,177 +110,187 @@ class FiveElementsDiagram extends StatelessWidget {
     );
   }
 
-  Widget _buildElementNode(Map<String, dynamic> item, double size) {
-    bool isDM = item['isDayMaster'];
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        color: isDM ? item['color'].withOpacity(0.1) : Colors.white,
-        shape: BoxShape.circle,
-        border: Border.all(color: item['color'], width: isDM ? 4 : 3),
-        boxShadow: [
-          BoxShadow(
-            color: (item['color'] as Color).withOpacity(0.3),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            item['name'],
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: item['color'],
-            ),
-          ),
-          Text(
-            "${item['value']}%",
-            style: const TextStyle(
-              fontSize: 12,
-              color: Colors.grey,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLegend(Color color, String text) {
+  Widget _buildLegendItem(String label, Color color) {
     return Row(
       children: [
-        Icon(Icons.arrow_right_alt, color: color, size: 20),
+        Icon(Icons.arrow_right_alt, color: color),
         const SizedBox(width: 4),
         Text(
-          text,
-          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+          label,
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
         ),
       ],
     );
   }
 
-  Color _getElementColor(String element) {
-    switch (element) {
-      case "목":
-        return const Color(0xFF4CAF50);
-      case "화":
-        return const Color(0xFFF44336);
-      case "토":
-        return const Color(0xFFFFC107);
-      case "금":
-        return const Color(0xFF9E9E9E);
-      case "수":
-        return const Color(0xFF2196F3);
-      default:
-        return Colors.grey;
-    }
+  Color _getElementColor(String key) {
+    if (key.contains('목')) return const Color(0xFF4CAF50);
+    if (key.contains('화')) return const Color(0xFFF44336);
+    if (key.contains('토')) return const Color(0xFFFFC107);
+    if (key.contains('금')) return const Color(0xFF9E9E9E);
+    if (key.contains('수')) return const Color(0xFF2196F3);
+    return Colors.grey;
+  }
+
+  String _getIsoKey(String korName) {
+    if (korName.contains('목')) return 'wood';
+    if (korName.contains('화')) return 'fire';
+    if (korName.contains('토')) return 'earth';
+    if (korName.contains('금')) return 'metal';
+    if (korName.contains('수')) return 'water';
+    return 'unknown';
   }
 }
 
-// 화살표 그리는 화가 클래스
-class FiveElementsPainter extends CustomPainter {
-  final double layoutRadius;
-  final double nodeRadius;
+// =========================================================
+// 화가 클래스 (Painter)
+// =========================================================
+class _PentagonPainter extends CustomPainter {
+  final List<Map<String, dynamic>> elements;
 
-  FiveElementsPainter({required this.layoutRadius, required this.nodeRadius});
+  _PentagonPainter(this.elements);
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
-    final Paint sangsaengPaint = Paint()
-      ..color = Colors.blue
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3;
-    final Paint sanggeukPaint = Paint()
-      ..color = Colors.red.withOpacity(0.6)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2;
+    // 반지름을 조금 줄여서 글자가 잘리지 않게 함
+    final radius = min(size.width, size.height) / 2 - 40;
 
-    List<Offset> centers = [];
+    final paintLineSaeng = Paint()
+      ..color = Colors.blue.withOpacity(0.8)
+      ..strokeWidth = 2
+      ..style = PaintingStyle.stroke;
+
+    final paintLineGeuk = Paint()
+      ..color = Colors.redAccent.withOpacity(0.4)
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+
+    List<Offset> points = [];
+
+    // 1. 꼭짓점 좌표 계산
     for (int i = 0; i < 5; i++) {
-      final double angle = (i * 72 - 90) * (math.pi / 180);
-      centers.add(
-        Offset(
-          center.dx + layoutRadius * math.cos(angle),
-          center.dy + layoutRadius * math.sin(angle),
-        ),
-      );
+      double angle = (2 * pi * i) / 5 - (pi / 2);
+      points.add(Offset(
+        center.dx + radius * cos(angle),
+        center.dy + radius * sin(angle),
+      ));
     }
 
+    // 2. 화살표 그리기
     for (int i = 0; i < 5; i++) {
-      int next = (i + 1) % 5;
-      _drawShortArrow(
-        canvas,
-        centers[i],
-        centers[next],
-        nodeRadius,
-        sangsaengPaint,
-      );
+      // 생 (i -> i+1)
+      _drawArrow(canvas, points[i], points[(i + 1) % 5], paintLineSaeng,
+          isGeuk: false);
+      // 극 (i -> i+2)
+      _drawArrow(canvas, points[i], points[(i + 2) % 5], paintLineGeuk,
+          isGeuk: true);
     }
 
-    List<int> starPath = [0, 2, 4, 1, 3, 0];
+    // 3. 원 그리기
     for (int i = 0; i < 5; i++) {
-      int start = starPath[i];
-      int end = starPath[i + 1];
-      _drawShortArrow(
-        canvas,
-        centers[start],
-        centers[end],
-        nodeRadius,
-        sanggeukPaint,
-      );
+      _drawElementCircle(canvas, points[i], elements[i]);
     }
   }
 
-  void _drawShortArrow(
-    Canvas canvas,
-    Offset p1,
-    Offset p2,
-    double radius,
-    Paint paint,
-  ) {
-    double dx = p2.dx - p1.dx;
-    double dy = p2.dy - p1.dy;
-    double distance = math.sqrt(dx * dx + dy * dy);
-    double unitX = dx / distance;
-    double unitY = dy / distance;
+  void _drawArrow(Canvas canvas, Offset start, Offset end, Paint paint,
+      {required bool isGeuk}) {
+    double circleRadius = 35.0; // 원 크기 고려
+    double angle = atan2(end.dy - start.dy, end.dx - start.dx);
 
-    Offset startDraw = Offset(
-      p1.dx + unitX * (radius * 1.05),
-      p1.dy + unitY * (radius * 1.05),
+    // 선이 원 안쪽까지 들어오지 않게 시작/끝점 조정
+    Offset startAdjusted = Offset(
+      start.dx + circleRadius * cos(angle),
+      start.dy + circleRadius * sin(angle),
     );
-    Offset endDraw = Offset(
-      p2.dx - unitX * (radius * 1.35),
-      p2.dy - unitY * (radius * 1.35),
+    Offset endAdjusted = Offset(
+      end.dx - circleRadius * cos(angle),
+      end.dy - circleRadius * sin(angle),
     );
 
-    canvas.drawLine(startDraw, endDraw, paint);
-    _drawArrowHead(canvas, startDraw, endDraw, paint.color);
-  }
+    canvas.drawLine(startAdjusted, endAdjusted, paint);
 
-  void _drawArrowHead(Canvas canvas, Offset p1, Offset p2, Color color) {
-    double angle = math.atan2(p2.dy - p1.dy, p2.dx - p1.dx);
-    final double arrowSize = 10;
-    final Path arrowPath = Path();
-    arrowPath.moveTo(p2.dx, p2.dy);
-    arrowPath.lineTo(
-      p2.dx - arrowSize * math.cos(angle - math.pi / 7),
-      p2.dy - arrowSize * math.sin(angle - math.pi / 7),
+    // 화살표 머리
+    double arrowSize = isGeuk ? 4 : 6;
+    var path = Path();
+    path.moveTo(endAdjusted.dx, endAdjusted.dy);
+    path.lineTo(
+      endAdjusted.dx - arrowSize * cos(angle - pi / 6),
+      endAdjusted.dy - arrowSize * sin(angle - pi / 6),
     );
-    arrowPath.lineTo(
-      p2.dx - arrowSize * math.cos(angle + math.pi / 7),
-      p2.dy - arrowSize * math.sin(angle + math.pi / 7),
+    path.lineTo(
+      endAdjusted.dx - arrowSize * cos(angle + pi / 6),
+      endAdjusted.dy - arrowSize * sin(angle + pi / 6),
     );
-    arrowPath.close();
-    final Paint fillPaint = Paint()
-      ..color = color
+    path.close();
+
+    var arrowPaint = Paint()
+      ..color = paint.color
       ..style = PaintingStyle.fill;
-    canvas.drawPath(arrowPath, fillPaint);
+    canvas.drawPath(path, arrowPaint);
+  }
+
+  void _drawElementCircle(
+      Canvas canvas, Offset center, Map<String, dynamic> data) {
+    bool isMe = data['isDayMaster'];
+    Color color = data['color'];
+    String name = data['name'];
+
+    // ★ [수정 핵심] int가 아니라 num으로 받아서 소수점 에러 방지!
+    num rawValue = data['value'];
+
+    // 소수점이 있으면 보여주고(.1), 없으면 정수로 표시
+    String valueText = (rawValue % 1 == 0)
+        ? "${rawValue.toInt()}%"
+        : "${rawValue.toStringAsFixed(1)}%";
+
+    Paint circlePaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+
+    Paint borderPaint = Paint()
+      ..color = color
+      ..strokeWidth = isMe ? 4 : 2
+      ..style = PaintingStyle.stroke;
+
+    // 그림자
+    canvas.drawCircle(
+        center,
+        30,
+        Paint()
+          ..color = Colors.grey.withOpacity(0.2)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5));
+
+    // 원 그리기
+    canvas.drawCircle(center, 30, circlePaint);
+    canvas.drawCircle(center, 30, borderPaint);
+
+    // 텍스트 (이름) - 영어일 때 글자가 길어질 수 있으므로 조정
+    TextSpan spanName = TextSpan(
+      style: TextStyle(
+          color: color,
+          fontSize: name.length > 3 ? 11 : 14, // 글자 길이에 따라 크기 조절
+          fontWeight: FontWeight.bold),
+      text: name,
+    );
+    TextPainter tpName = TextPainter(
+        text: spanName,
+        textAlign: TextAlign.center,
+        textDirection: TextDirection.ltr);
+    tpName.layout();
+    tpName.paint(canvas, Offset(center.dx - tpName.width / 2, center.dy - 8));
+
+    // 텍스트 (값)
+    TextSpan spanValue = TextSpan(
+      style: TextStyle(color: Colors.grey[600], fontSize: 10),
+      text: valueText, // 수정된 텍스트 사용
+    );
+    TextPainter tpValue = TextPainter(
+        text: spanValue,
+        textAlign: TextAlign.center,
+        textDirection: TextDirection.ltr);
+    tpValue.layout();
+    tpValue.paint(canvas, Offset(center.dx - tpValue.width / 2, center.dy + 8));
   }
 
   @override

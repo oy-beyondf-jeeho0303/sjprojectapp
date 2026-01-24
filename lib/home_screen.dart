@@ -5,10 +5,12 @@ import 'package:intl/intl.dart';
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:sj_project_app/services/purchase_service.dart';
+import 'package:sj_project_app/utils/localization_data.dart'; // ★ 추가
 
 // ★ 파일 import 확인
 import 'city_data.dart';
 import 'five_elements.dart';
+import 'dart:ui' as ui; // 언어 감지용
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -24,6 +26,30 @@ class _HomeScreenState extends State<HomeScreen> {
   TimeOfDay _selectedTime = const TimeOfDay(hour: 13, minute: 30);
   String _gender = "M";
   bool _isLunar = false;
+
+  // 기본값은 한국어
+  String _targetLanguage = "ko";
+
+  @override
+  void initState() {
+    super.initState();
+    _detectLanguage();
+  }
+
+  void _detectLanguage() {
+    // 기기 설정 언어 가져오기 (예: ko_KR, en_US)
+    Locale deviceLocale = ui.window.locale;
+
+    // 한국어가 아니면 무조건 영어로 설정
+    if (deviceLocale.languageCode != 'ko') {
+      setState(() {
+        _targetLanguage = 'en';
+      });
+      print("🌍 외국어 사용자 감지: English Mode Activated");
+    } else {
+      print("🇰🇷 한국어 사용자 감지");
+    }
+  }
 
   // 기본 도시
   City _selectedCity = globalCities[0];
@@ -58,6 +84,7 @@ class _HomeScreenState extends State<HomeScreen> {
         "latitude": _selectedCity.lat,
         "longitude": _selectedCity.lng,
         "timezone": _selectedCity.timezone,
+        "targetLanguage": _targetLanguage
       };
 
       final response = await http.post(
@@ -168,7 +195,7 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _buildHeader("사주 정보 입력"),
+            _buildHeader('header_input'), // "사주 정보 입력"
             _buildInputCard(),
             const SizedBox(height: 30),
             if (_isLoading)
@@ -176,26 +203,28 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: CircularProgressIndicator(color: Colors.black87),
               )
             else if (_sajuDetail != null) ...[
-              _buildHeader("내 사주 원국 (만세력)"),
+              _buildHeader('header_manse'),
               _buildManseGrid(),
               const SizedBox(height: 30),
               _buildDaewoonList(),
               const SizedBox(height: 20),
               _buildSeunList(),
               const SizedBox(height: 30),
-              _buildHeader("오행 분석 및 분포"),
+              _buildHeader('header_analysis'), // "오행 분석"
               _buildAnalysisCard(),
               const SizedBox(height: 30),
-              _buildHeader("핵심 기운 (용신)"),
+              _buildHeader('header_yongsin'), // "용신"
               _buildYongsinCard(),
               const SizedBox(height: 30),
-              _buildHeader("오행 생극 관계도"),
+              _buildHeader('header_diagram'), // "관계도"
               FiveElementsDiagram(
                 elementRun: _sajuDetail!['elementRun'],
                 dayMasterElement: _sajuDetail!['dayMasterElement'],
+                // ★ 이 줄만 추가하면 됩니다!
+                targetLanguage: _targetLanguage,
               ),
               const SizedBox(height: 30),
-              _buildHeader("상세 운세 리포트"),
+              _buildHeader('header_report'), // "리포트"
               _buildReportCard(),
             ],
           ],
@@ -204,11 +233,12 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildHeader(String title) {
+  Widget _buildHeader(String key, {Map<String, String>? params}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12, left: 4),
       child: Text(
-        title,
+        // ★ 키를 받아서 언어에 맞는 텍스트로 변환
+        AppLocale.get(_targetLanguage, key, params: params),
         style: const TextStyle(
           fontSize: 18,
           fontWeight: FontWeight.bold,
@@ -428,15 +458,21 @@ class _HomeScreenState extends State<HomeScreen> {
             _buildTableLabelColumn(),
 
             // 우측 데이터 (시, 일, 월, 연)
-            _buildTablePillar("시주", _sajuDetail!['time'], isLast: false),
+            _buildTablePillar(AppLocale.get(_targetLanguage, "label_siju"),
+                _sajuDetail!['time'],
+                isLast: false),
             _buildTablePillar(
-              "일주",
+              AppLocale.get(_targetLanguage, "label_ilju"),
               _sajuDetail!['day'],
               isMe: true,
               isLast: false,
             ),
-            _buildTablePillar("월주", _sajuDetail!['month'], isLast: false),
-            _buildTablePillar("연주", _sajuDetail!['year'], isLast: true),
+            _buildTablePillar(AppLocale.get(_targetLanguage, "label_wolju"),
+                _sajuDetail!['month'],
+                isLast: false),
+            _buildTablePillar(AppLocale.get(_targetLanguage, "label_yeonju"),
+                _sajuDetail!['year'],
+                isLast: true),
           ],
         ),
       ),
@@ -462,7 +498,8 @@ class _HomeScreenState extends State<HomeScreen> {
         Padding(
           padding: const EdgeInsets.only(left: 4, bottom: 8),
           child: Text(
-            "대운 (10년마다 바뀌는 운, 대운수: $daewoonNum)",
+            AppLocale.get(_targetLanguage, 'header_daewoon',
+                params: {'num': '$daewoonNum'}),
             style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
@@ -574,10 +611,10 @@ class _HomeScreenState extends State<HomeScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Padding(
+        Padding(
           padding: EdgeInsets.only(left: 4, bottom: 8),
           child: Text(
-            "세운 (매년 바뀌는 운)",
+            AppLocale.get(_targetLanguage, 'header_seun'),
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
@@ -823,7 +860,7 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Container(
               alignment: Alignment.center,
               child: Text(
-                "천간",
+                AppLocale.get(_targetLanguage, 'label_gan'),
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
@@ -838,7 +875,7 @@ class _HomeScreenState extends State<HomeScreen> {
             height: 20, // 우측 십성 텍스트 대략적 높이
             alignment: Alignment.center,
             child: Text(
-              "십성",
+              AppLocale.get(_targetLanguage, 'label_shipseong'),
               style: TextStyle(fontSize: 11, color: Colors.grey[400]),
             ),
           ),
@@ -855,7 +892,7 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Container(
               alignment: Alignment.center,
               child: Text(
-                "지지",
+                AppLocale.get(_targetLanguage, 'label_ji'),
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
@@ -870,7 +907,7 @@ class _HomeScreenState extends State<HomeScreen> {
             height: 20,
             alignment: Alignment.center,
             child: Text(
-              "십성",
+              AppLocale.get(_targetLanguage, 'label_shipseong'),
               style: TextStyle(fontSize: 11, color: Colors.grey[400]),
             ),
           ),
@@ -882,6 +919,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // [수정 4] 십성 위젯 (깔끔한 텍스트)
   Widget _buildGridShipseong(String? text) {
+    if (text == null || text.isEmpty) return const SizedBox();
+    // 2. ★ [핵심] 번역 적용 (한글 '편관' -> 영어 'Power')
+    String translatedText = AppLocale.get(_targetLanguage, text);
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
@@ -889,7 +930,7 @@ class _HomeScreenState extends State<HomeScreen> {
         borderRadius: BorderRadius.circular(4),
       ),
       child: Text(
-        text ?? "",
+        translatedText,
         style: TextStyle(
           fontSize: 11,
           color: Colors.grey[700],
@@ -1017,6 +1058,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildShipseongTag(String? text) {
     if (text == null || text.isEmpty) return const SizedBox();
+
+    // ★ [수정] 변수 선언이 빠져 있었습니다! 여기서 선언합니다.
+    String translatedText = AppLocale.get(_targetLanguage, text);
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -1025,9 +1070,9 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       alignment: Alignment.center,
       child: Text(
-        text,
+        translatedText,
         style: TextStyle(
-          fontSize: 10,
+          fontSize: _targetLanguage == 'en' ? 9 : 10,
           color: Colors.grey[700],
           fontWeight: FontWeight.bold,
         ),
@@ -1070,23 +1115,16 @@ class _HomeScreenState extends State<HomeScreen> {
           Expanded(
             child: Column(
               children: [
-                _buildAnalysisRow("목(Tree)", run['목'], const Color(0xFF4CAF50)),
-                _buildAnalysisRow("화(Fire)", run['화'], const Color(0xFFF44336)),
-                _buildAnalysisRow(
-                  "토(Earth)",
-                  run['토'],
-                  const Color(0xFFFFC107),
-                ),
-                _buildAnalysisRow(
-                  "금(Metal)",
-                  run['금'],
-                  const Color(0xFF9E9E9E),
-                ),
-                _buildAnalysisRow(
-                  "수(Water)",
-                  run['수'],
-                  const Color(0xFF2196F3),
-                ),
+                _buildAnalysisRow(AppLocale.get(_targetLanguage, 'wood'),
+                    run['목'], const Color(0xFF4CAF50)),
+                _buildAnalysisRow(AppLocale.get(_targetLanguage, 'fire'),
+                    run['화'], const Color(0xFFF44336)),
+                _buildAnalysisRow(AppLocale.get(_targetLanguage, 'Earth'),
+                    run['토'], const Color(0xFFFFC107)),
+                _buildAnalysisRow(AppLocale.get(_targetLanguage, 'Metal'),
+                    run['금'], const Color(0xFF9E9E9E)),
+                _buildAnalysisRow(AppLocale.get(_targetLanguage, 'Water'),
+                    run['수'], const Color(0xFF2196F3)),
               ],
             ),
           ),
@@ -1107,7 +1145,19 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildAnalysisRow(String label, dynamic value, Color color) {
     double val = (value is int) ? value.toDouble() : (value as double);
-    String status = val > 35 ? "과다" : (val < 10 ? "부족" : "적정");
+    //  String status = val > 35 ? "과다" : (val < 10 ? "부족" : "적정");
+
+    // 1. 상태(과다/부족) 다국어 처리
+    String statusKey = val > 35
+        ? 'status_excess'
+        : (val < 10 ? 'status_lack' : 'status_proper');
+    String statusText = AppLocale.get(_targetLanguage, statusKey);
+
+    // 2. 오행 라벨(목, 화...) 다국어 처리
+    // label이 "목(Tree)" 처럼 들어올 수 있으므로, 핵심 단어만 뽑아서 키로 변환
+    String elemKey = _getElemKey(label);
+    String elemText = AppLocale.get(_targetLanguage, elemKey);
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
@@ -1128,11 +1178,11 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
           Text(
-            "${val.toInt()}% ($status)",
+            "${val.toInt()}% ($statusText)", // 50% (Excess)
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.bold,
-              color: status == "적정" ? Colors.grey : color,
+              color: statusKey == 'status_proper' ? Colors.grey : color,
             ),
           ),
         ],
@@ -1140,11 +1190,23 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // [수정] 용신 카드 (다국어 완벽 적용)
   Widget _buildYongsinCard() {
     if (_sajuDetail == null) return const SizedBox();
+
+    // 서버에서 받은 원본 데이터 (예: "수", "금")
     String yongsin = _sajuDetail!['yongsin'] ?? "알 수 없음";
     String dayMasterElem = _sajuDetail!['dayMasterElement'] ?? "";
+
+    // ★ [핵심] 한글 오행 -> 영어 키(wood, fire...)로 변환 -> 다국어 텍스트 가져오기
+    String yongsinKey = _getElemKey(yongsin);
+    String dayMasterKey = _getElemKey(dayMasterElem);
+
+    String yongsinTrans = AppLocale.get(_targetLanguage, yongsinKey);
+    String dayMasterElemTrans = AppLocale.get(_targetLanguage, dayMasterKey);
+
     Color yColor = _getElementColor(yongsin);
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -1157,6 +1219,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       child: Row(
         children: [
+          // 왼쪽 원형 아이콘
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -1164,36 +1227,42 @@ class _HomeScreenState extends State<HomeScreen> {
               shape: BoxShape.circle,
             ),
             child: Text(
-              yongsin,
+              yongsinTrans, // 번역된 텍스트 (Water / 수)
               style: TextStyle(
-                fontSize: 32,
+                // 영문일 경우 글자가 길어서 폰트 조정
+                fontSize: _targetLanguage == 'en' ? 14 : 32,
                 fontWeight: FontWeight.bold,
                 color: yColor,
               ),
             ),
           ),
           const SizedBox(width: 20),
+          // 오른쪽 설명 텍스트
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // "To support your Day Master (Metal),"
                 Text(
-                  "나의 일간($dayMasterElem)을 돕는",
+                  AppLocale.get(_targetLanguage, 'yongsin_desc_1',
+                      params: {'elem': dayMasterElemTrans}),
                   style: TextStyle(fontSize: 14, color: Colors.grey[600]),
                 ),
-                Row(
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     Text(
-                      yongsin,
+                      yongsinTrans,
                       style: TextStyle(
                         fontSize: 22,
                         fontWeight: FontWeight.bold,
                         color: yColor,
                       ),
                     ),
-                    const Text(
-                      " 기운이 필요합니다.",
-                      style: TextStyle(
+                    // " energy is needed."
+                    Text(
+                      AppLocale.get(_targetLanguage, 'yongsin_desc_2'),
+                      style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),
@@ -1201,8 +1270,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
                 const SizedBox(height: 5),
+                // "Using this element balances your life."
                 Text(
-                  "이 기운을 활용하면 사주의 균형이 잡힙니다.",
+                  AppLocale.get(_targetLanguage, 'yongsin_sub'),
                   style: TextStyle(fontSize: 12, color: Colors.grey[500]),
                 ),
               ],
@@ -1211,6 +1281,17 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
     );
+  }
+
+  // ★★★ [신규 추가] 오행 한글 이름을 키값(wood, fire)으로 바꾸는 함수
+  // 이 함수가 없으면 _buildYongsinCard에서 에러가 납니다!
+  String _getElemKey(String korName) {
+    if (korName.contains('목')) return 'wood';
+    if (korName.contains('화')) return 'fire';
+    if (korName.contains('토')) return 'earth';
+    if (korName.contains('금')) return 'metal';
+    if (korName.contains('수')) return 'water';
+    return 'unknown';
   }
 
   // [수정] 운세 리포트 카드 (매거진 스타일 UI)
