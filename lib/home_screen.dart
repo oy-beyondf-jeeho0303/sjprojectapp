@@ -70,17 +70,14 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? _sajuDetail;
   String? _fortuneReport;
 
-  Future<void> _fetchSajuData() async {
+  Future<void> _fetchSajuData([String? profileKey]) async {
     setState(() {
       _isLoading = true;
-      _sajuDetail = null;
-      _fortuneReport = null;
     });
 
     try {
-      final String birthDate = DateFormat(
-        "yyyy-MM-dd'T'00:00:00",
-      ).format(_selectedDate);
+      final String birthDate =
+          DateFormat("yyyy-MM-dd'T'00:00:00").format(_selectedDate);
       final String birthTime =
           "${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}";
 
@@ -88,7 +85,7 @@ class _HomeScreenState extends State<HomeScreen> {
         "email": "user@test.com",
         "birthDate": birthDate,
         "birthTime": birthTime,
-        "isLunar": false,
+        "isLunar": _isLunar,
         "gender": _gender,
         "birthCountry": _selectedCity.country,
         "birthCity": _selectedCity.name,
@@ -106,35 +103,35 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
-
-        // ★ [추가] 데이터에 현재 언어 정보('ko' or 'en')를 심어줍니다.
-        data['lang'] = _targetLanguage;
+        data['lang'] = _targetLanguage; // 언어 정보 추가
 
         setState(() {
           _sajuDetail = data['sajuDetail'];
           _fortuneReport = data['fortuneReport'];
         });
 
-        // 1. 저장을 위한 키(Key) 다시 생성
-        // (_onAnalyzePressed에서 만들었던 것과 똑같은 재료로 만들어야 합니다)
-        String formattedTime =
-            "${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}";
+        // ★ [핵심] 키가 없으면 생성 후 데이터 저장
+        if (profileKey == null) {
+          final purchaseService = PurchaseService();
+          profileKey = purchaseService.generateProfileKey(
+              _selectedDate, birthTime, _gender, _isLunar);
+        }
 
-        final purchaseService = PurchaseService();
-        String profileKey = purchaseService.generateProfileKey(
-          _selectedDate,
-          formattedTime, // Formatted String 시간
-          _gender,
-          _isLunar,
-        );
-
-        // 데이터 저장 (이제 다음번엔 서버 안 부름)
-        //  await purchaseService.savePurchase(profileKey, data);
+        // 내부 저장소에 데이터 캐싱 (다음번 로딩 0.1초 구현)
+        await PurchaseService().savePurchase(profileKey, data);
       } else {
-        _showError("서버 오류: ${response.statusCode}");
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("서버 오류: ${response.statusCode}")),
+          );
+        }
       }
     } catch (e) {
-      _showError("서버 연결 실패.\n$e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("서버 연결 실패: $e")),
+        );
+      }
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -487,7 +484,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               child: const Text(
                 "운세 분석 시작",
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
               ),
             ),
           ),
@@ -1561,46 +1558,77 @@ class _HomeScreenState extends State<HomeScreen> {
   // ★★★ [수정됨] 결제 체크 및 분석 시작 로직 ★★★
   // ============================================================
   void _onAnalyzePressed() async {
-    // 1. 시간 포맷팅 (TimeOfDay -> String 변환)
-    // 컨트롤러 대신 _selectedTime 변수를 사용합니다.
-    String formattedTime =
+    // 2. 고유 키 생성
+    final purchaseService = PurchaseService();
+    String birthTimeStr =
         "${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}";
 
-    // (유효성 검사: TimeOfDay는 기본값이 있으므로 null 체크 불필요)
-
-    // 2. 사주 고유 키 생성
-    final purchaseService = PurchaseService();
     String profileKey = purchaseService.generateProfileKey(
       _selectedDate,
-      formattedTime, // ★ _birthTimeController.text 대신 이거 사용!
+      birthTimeStr,
       _gender,
       _isLunar,
     );
 
-    // 3. 구매 여부 확인
-    //  bool isPaid = await purchaseService.isPurchased(profileKey);
-    bool isPaid = true;
+    // 3. 내부 저장소 확인 (결제 여부 + 데이터 유무)
+    bool isPurchased = await purchaseService.isPurchased(profileKey);
 
-    if (isPaid) {
+    if (isPurchased) {
+      // [CASE A] 결제 내역 있음 -> 데이터 확인
       var savedData = await purchaseService.getSavedData(profileKey);
-      // var savedData = "";
-      // ★ [수정] 데이터가 있고 && 저장된 언어가 현재 언어와 같을 때만 캐시 사용
-      String? savedLang = savedData?['lang']; // 아까 심어둔 언어 확인
-      print("🎉 이미 결제된 사주입니다.");
 
-      if (savedData != null && savedLang == _targetLanguage) {
-        print("🎉 저장된 데이터($savedLang)를 불러옵니다.");
+      // 데이터가 있고 && 언어가 같으면 -> 캐시 사용 (서버 호출 X)
+      if (savedData != null && savedData['lang'] == _targetLanguage) {
         setState(() {
-          //    _sajuDetail = savedData['sajuDetail'];
-          //    _fortuneReport = savedData['fortuneReport'];
+          _sajuDetail = savedData['sajuDetail'];
+          _fortuneReport = savedData['fortuneReport'];
         });
-      } else {
-        print("🔄 언어가 변경되었거나 데이터가 없어서 서버에서 다시 가져옵니다.");
-        _fetchSajuData(); // (무료 재조회)
+        return;
       }
+
+      // 데이터 갱신 필요 -> 서버 호출
+      _fetchSajuData(profileKey);
     } else {
-      // 2. 결제 안 함 -> 결제창 띄우기
-      _showPaymentDialog(profileKey);
+      // [CASE B] 결제 안 함 -> 결제 화면으로
+      _showPaymentScreen(profileKey);
+    }
+  }
+
+  void _showPaymentScreen(String profileKey) async {
+    // ★ [임시 수정] 결제 화면 대신 '테스트용 팝업'을 띄웁니다.
+    bool? isConfirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("결제 (테스트 모드)"),
+        content: const Text("아직 결제 모듈이 연동되지 않았습니다.\n무료로 분석을 진행하시겠습니까?"),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false), // 취소
+            child: const Text("취소"),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true), // 승인
+            style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2D3436)),
+            child: const Text("무료로 진행"),
+          ),
+        ],
+      ),
+    );
+
+    // 사용자가 [무료로 진행]을 눌렀다면?
+    if (isConfirmed == true) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("테스트 결제 승인! 분석을 시작합니다.")),
+        );
+      }
+
+      // 1. '돈 냈음(구매 함)'으로 처리하고 저장
+      await PurchaseService().savePurchase(profileKey, null);
+
+      // 2. 서버에서 데이터 받아오기
+      _fetchSajuData(profileKey);
     }
   }
 
