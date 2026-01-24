@@ -5,7 +5,8 @@ import 'package:intl/intl.dart';
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:sj_project_app/services/purchase_service.dart';
-import 'package:sj_project_app/utils/localization_data.dart'; // ★ 추가
+import 'package:sj_project_app/utils/localization_data.dart';
+import 'dart:ui' as ui; // 휴대폰 설정 접근용
 
 // ★ 파일 import 확인
 import 'city_data.dart';
@@ -40,7 +41,8 @@ class _HomeScreenState extends State<HomeScreen> {
     // 기기 설정 언어 가져오기 (예: ko_KR, en_US)
     Locale deviceLocale = ui.window.locale;
 
-    // 한국어가 아니면 무조건 영어로 설정
+    // ❌ [기존 코드 주석 처리] 에뮬레이터가 영어라고 해서 영어로 바꾸지 마!
+    /*
     if (deviceLocale.languageCode != 'ko') {
       setState(() {
         _targetLanguage = 'en';
@@ -49,6 +51,13 @@ class _HomeScreenState extends State<HomeScreen> {
     } else {
       print("🇰🇷 한국어 사용자 감지");
     }
+    */
+
+    // ✅ [수정 코드] 무조건 한국어로 고정!
+    setState(() {
+      _targetLanguage = 'ko';
+    });
+    print("🇰🇷 개발 모드: 강제 한국어 설정 완료");
   }
 
   // 기본 도시
@@ -74,7 +83,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
       final bodyData = {
         "email": "user@test.com",
-        "targetLanguage": "ko",
         "birthDate": birthDate,
         "birthTime": birthTime,
         "isLunar": false,
@@ -95,6 +103,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
+
+        // ★ [추가] 데이터에 현재 언어 정보('ko' or 'en')를 심어줍니다.
+        data['lang'] = _targetLanguage;
+
         setState(() {
           _sajuDetail = data['sajuDetail'];
           _fortuneReport = data['fortuneReport'];
@@ -114,7 +126,7 @@ class _HomeScreenState extends State<HomeScreen> {
         );
 
         // 데이터 저장 (이제 다음번엔 서버 안 부름)
-        await purchaseService.savePurchase(profileKey, data);
+        //  await purchaseService.savePurchase(profileKey, data);
       } else {
         _showError("서버 오류: ${response.statusCode}");
       }
@@ -220,7 +232,6 @@ class _HomeScreenState extends State<HomeScreen> {
               FiveElementsDiagram(
                 elementRun: _sajuDetail!['elementRun'],
                 dayMasterElement: _sajuDetail!['dayMasterElement'],
-                // ★ 이 줄만 추가하면 됩니다!
                 targetLanguage: _targetLanguage,
               ),
               const SizedBox(height: 30),
@@ -1084,10 +1095,10 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_sajuDetail == null) return const SizedBox();
     Map<String, dynamic> run = _sajuDetail!['elementRun'];
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(23),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(23),
         boxShadow: [
           BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10),
         ],
@@ -1095,12 +1106,12 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Row(
         children: [
           SizedBox(
-            width: 100,
-            height: 100,
+            width: 120,
+            height: 120,
             child: PieChart(
               PieChartData(
                 sectionsSpace: 0,
-                centerSpaceRadius: 25,
+                centerSpaceRadius: 30,
                 sections: [
                   _makeSection(run['목'], const Color(0xFF4CAF50)),
                   _makeSection(run['화'], const Color(0xFFF44336)),
@@ -1111,7 +1122,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-          const SizedBox(width: 20),
+          const SizedBox(width: 30),
           Expanded(
             child: Column(
               children: [
@@ -1119,11 +1130,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     run['목'], const Color(0xFF4CAF50)),
                 _buildAnalysisRow(AppLocale.get(_targetLanguage, 'fire'),
                     run['화'], const Color(0xFFF44336)),
-                _buildAnalysisRow(AppLocale.get(_targetLanguage, 'Earth'),
+                _buildAnalysisRow(AppLocale.get(_targetLanguage, 'earth'),
                     run['토'], const Color(0xFFFFC107)),
-                _buildAnalysisRow(AppLocale.get(_targetLanguage, 'Metal'),
+                _buildAnalysisRow(AppLocale.get(_targetLanguage, 'metal'),
                     run['금'], const Color(0xFF9E9E9E)),
-                _buildAnalysisRow(AppLocale.get(_targetLanguage, 'Water'),
+                _buildAnalysisRow(AppLocale.get(_targetLanguage, 'water'),
                     run['수'], const Color(0xFF2196F3)),
               ],
             ),
@@ -1154,7 +1165,6 @@ class _HomeScreenState extends State<HomeScreen> {
     String statusText = AppLocale.get(_targetLanguage, statusKey);
 
     // 2. 오행 라벨(목, 화...) 다국어 처리
-    // label이 "목(Tree)" 처럼 들어올 수 있으므로, 핵심 단어만 뽑아서 키로 변환
     String elemKey = _getElemKey(label);
     String elemText = AppLocale.get(_targetLanguage, elemKey);
 
@@ -1166,21 +1176,22 @@ class _HomeScreenState extends State<HomeScreen> {
           Row(
             children: [
               Container(
-                width: 8,
-                height: 8,
+                width: 10,
+                height: 10,
                 decoration: BoxDecoration(color: color, shape: BoxShape.circle),
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: 8),
               Text(
                 label,
-                style: const TextStyle(fontSize: 12, color: Colors.black87),
+                style: const TextStyle(
+                    fontSize: 12, color: Color.fromARGB(221, 47, 47, 47)),
               ),
             ],
           ),
           Text(
             "${val.toInt()}% ($statusText)", // 50% (Excess)
             style: TextStyle(
-              fontSize: 12,
+              fontSize: 14,
               fontWeight: FontWeight.bold,
               color: statusKey == 'status_proper' ? Colors.grey : color,
             ),
@@ -1230,7 +1241,7 @@ class _HomeScreenState extends State<HomeScreen> {
               yongsinTrans, // 번역된 텍스트 (Water / 수)
               style: TextStyle(
                 // 영문일 경우 글자가 길어서 폰트 조정
-                fontSize: _targetLanguage == 'en' ? 14 : 32,
+                fontSize: _targetLanguage == 'en' ? 15 : 30,
                 fontWeight: FontWeight.bold,
                 color: yColor,
               ),
@@ -1452,23 +1463,25 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     // 3. 구매 여부 확인
-    bool isPaid = await purchaseService.isPurchased(profileKey);
+    //  bool isPaid = await purchaseService.isPurchased(profileKey);
+    bool isPaid = true;
 
     if (isPaid) {
+      var savedData = await purchaseService.getSavedData(profileKey);
+      // var savedData = "";
+      // ★ [수정] 데이터가 있고 && 저장된 언어가 현재 언어와 같을 때만 캐시 사용
+      String? savedLang = savedData?['lang']; // 아까 심어둔 언어 확인
       print("🎉 이미 결제된 사주입니다.");
 
-      // ★ [신규] 저장된 데이터가 있는지 확인
-      var savedData = await purchaseService.getSavedData(profileKey);
-
-      if (savedData != null) {
-        // A. 저장된 게 있으면 -> 호출!
+      if (savedData != null && savedLang == _targetLanguage) {
+        print("🎉 저장된 데이터($savedLang)를 불러옵니다.");
         setState(() {
-          _sajuDetail = savedData['sajuDetail'];
-          _fortuneReport = savedData['fortuneReport'];
+          //    _sajuDetail = savedData['sajuDetail'];
+          //    _fortuneReport = savedData['fortuneReport'];
         });
       } else {
-        // B. 결제는 했는데 데이터가 날아갔으면(드문 경우) -> 서버 호출 (무료 재조회)
-        _fetchSajuData();
+        print("🔄 언어가 변경되었거나 데이터가 없어서 서버에서 다시 가져옵니다.");
+        _fetchSajuData(); // (무료 재조회)
       }
     } else {
       // 2. 결제 안 함 -> 결제창 띄우기
@@ -1502,18 +1515,46 @@ class _HomeScreenState extends State<HomeScreen> {
                     borderRadius: BorderRadius.circular(8)),
               ),
               onPressed: () async {
-                // --- 결제 성공 처리 ---
-                Navigator.pop(context); // 창 닫기
+                Navigator.pop(context); // 다이얼로그 닫기
 
-                // ★ 로컬 저장소에 '구매 완료' 저장
-                await PurchaseService().savePurchase(profileKey, null);
+                // 1. 결제 화면으로 이동
+                /*
+                final result = await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => PaymentScreen(
+                      orderId:
+                          profileKey, // 주문번호로 profileKey 사용 (또는 timestamp 조합)
+                      amount: 1000, // 테스트 금액 1000원
+                      name: '사주 정밀 분석',
+                    ),
+                  ),
+                );
+                */
 
-                if (mounted) {
+                /*
+                // 2. 결제 화면에서 돌아왔을 때 결과 처리
+                if (result != null && result['success'] == true) {
+                  // 3. (중요) 서버로 검증 요청 보내기
+                  // final verifyResp = await http.post(Uri.parse('$baseUrl/payment/complete'), ... );
+                  // if (verifyResp.statusCode == 200) { ... }
+
+                  // 검증 성공 시:
+                  //     await PurchaseService()
+                  //         .savePurchase(profileKey, null); // 로컬 저장
+                  _fetchSajuData(); // 데이터 불러오기
+
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("결제 성공! 분석을 시작합니다.")),
+                    const SnackBar(content: Text("결제가 완료되었습니다!")),
                   );
-                  _fetchSajuData(); // 분석 시작
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                        content:
+                            Text("결제 실패: ${result?['error_msg'] ?? '취소됨'}")),
+                  );
                 }
+                */
               },
               child: const Text("결제하기 (무료)",
                   style: TextStyle(color: Colors.white)),

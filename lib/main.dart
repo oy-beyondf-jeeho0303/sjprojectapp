@@ -2,7 +2,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
-import 'home_screen.dart'; // ★ 우리가 만든 화면 불러오기
+import 'home_screen.dart';
 
 // 보안 인증서 무시
 class MyHttpOverrides extends HttpOverrides {

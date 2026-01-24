@@ -16,10 +16,8 @@ class FiveElementsDiagram extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 데이터 없으면 0으로 초기화
+    // 데이터가 없으면 0으로 초기화
     final data = elementRun ?? {'목': 0, '화': 0, '토': 0, '금': 0, '수': 0};
-
-    // 로직용 순서 (고정)
     final List<String> standardOrder = ['목', '화', '토', '금', '수'];
 
     // 1. 일간을 맨 위(12시 방향)로 보내기 위한 회전 로직
@@ -43,7 +41,7 @@ class FiveElementsDiagram extends StatelessWidget {
         'key': key,
         'name': translatedName,
         'color': _getElementColor(key),
-        'value': data[key], // 여기서는 값 그대로 전달 (int or double)
+        'value': data[key], // num 타입으로 전달
         'isDayMaster': key == dayMasterElement,
       };
     }).toList();
@@ -67,27 +65,29 @@ class FiveElementsDiagram extends StatelessWidget {
       ),
       child: Column(
         children: [
-          // ★ [수정] 헤더 레이아웃: Row 대신 Column + Wrap 사용으로 넘침 방지
           Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // 1. 제목 (Day Master: Metal)
               Text(
                 AppLocale.get(targetLanguage, 'diagram_standard',
                     params: {'elem': dayMasterName}),
                 style: const TextStyle(
-                  fontSize: 16,
+                  fontSize: 18, // 제목도 16->18로 살짝 키움
                   fontWeight: FontWeight.bold,
                   color: Color(0xFF2D3436),
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 12),
+
+              // 2. 범례 (Support / Control)
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   _buildLegendItem(
                       AppLocale.get(targetLanguage, 'diagram_saeng'),
                       Colors.blue),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 20),
                   _buildLegendItem(
                       AppLocale.get(targetLanguage, 'diagram_geuk'),
                       Colors.redAccent),
@@ -97,9 +97,9 @@ class FiveElementsDiagram extends StatelessWidget {
           ),
           const SizedBox(height: 20),
 
-          // 다이어그램 영역
+          // 다이어그램 영역 (높이 확보)
           SizedBox(
-            height: 300,
+            height: 400, // ★ 380 -> 400 (원이 커졌으니 공간 더 확보)
             width: double.infinity,
             child: CustomPaint(
               painter: _PentagonPainter(displayElements),
@@ -113,11 +113,12 @@ class FiveElementsDiagram extends StatelessWidget {
   Widget _buildLegendItem(String label, Color color) {
     return Row(
       children: [
-        Icon(Icons.arrow_right_alt, color: color),
+        Icon(Icons.arrow_right_alt, color: color, size: 24), // 아이콘 20->24
         const SizedBox(width: 4),
         Text(
           label,
-          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+          style: const TextStyle(
+              fontSize: 13, fontWeight: FontWeight.bold, color: Colors.grey),
         ),
       ],
     );
@@ -143,7 +144,7 @@ class FiveElementsDiagram extends StatelessWidget {
 }
 
 // =========================================================
-// 화가 클래스 (Painter)
+// 화가 클래스 (Painter) - ★ 여기가 핵심 수정 부분입니다 ★
 // =========================================================
 class _PentagonPainter extends CustomPainter {
   final List<Map<String, dynamic>> elements;
@@ -153,17 +154,18 @@ class _PentagonPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
-    // 반지름을 조금 줄여서 글자가 잘리지 않게 함
-    final radius = min(size.width, size.height) / 2 - 40;
+    // 반지름 여백 조정 (원이 커졌으므로 전체 다각형 크기는 살짝 줄임)
+    final radius = min(size.width, size.height) / 2 - 45;
 
+    // ★ 선 두께 강화 (잘 보이게)
     final paintLineSaeng = Paint()
       ..color = Colors.blue.withOpacity(0.8)
-      ..strokeWidth = 2
+      ..strokeWidth = 3.5
       ..style = PaintingStyle.stroke;
 
     final paintLineGeuk = Paint()
       ..color = Colors.redAccent.withOpacity(0.4)
-      ..strokeWidth = 1.5
+      ..strokeWidth = 3
       ..style = PaintingStyle.stroke;
 
     List<Offset> points = [];
@@ -179,10 +181,8 @@ class _PentagonPainter extends CustomPainter {
 
     // 2. 화살표 그리기
     for (int i = 0; i < 5; i++) {
-      // 생 (i -> i+1)
       _drawArrow(canvas, points[i], points[(i + 1) % 5], paintLineSaeng,
           isGeuk: false);
-      // 극 (i -> i+2)
       _drawArrow(canvas, points[i], points[(i + 2) % 5], paintLineGeuk,
           isGeuk: true);
     }
@@ -195,10 +195,10 @@ class _PentagonPainter extends CustomPainter {
 
   void _drawArrow(Canvas canvas, Offset start, Offset end, Paint paint,
       {required bool isGeuk}) {
-    double circleRadius = 35.0; // 원 크기 고려
+    // ★ 화살표 시작/끝 지점 조정 (원이 커진 만큼 더 밖에서 멈춰야 함)
+    double circleRadius = 47.0; // 원 반지름(45) + 여유분(2)
     double angle = atan2(end.dy - start.dy, end.dx - start.dx);
 
-    // 선이 원 안쪽까지 들어오지 않게 시작/끝점 조정
     Offset startAdjusted = Offset(
       start.dx + circleRadius * cos(angle),
       start.dy + circleRadius * sin(angle),
@@ -210,8 +210,8 @@ class _PentagonPainter extends CustomPainter {
 
     canvas.drawLine(startAdjusted, endAdjusted, paint);
 
-    // 화살표 머리
-    double arrowSize = isGeuk ? 4 : 6;
+    // ★ 화살표 머리 크기 확대
+    double arrowSize = isGeuk ? 9 : 11; // 4/6 -> 8/10
     var path = Path();
     path.moveTo(endAdjusted.dx, endAdjusted.dy);
     path.lineTo(
@@ -236,10 +236,7 @@ class _PentagonPainter extends CustomPainter {
     Color color = data['color'];
     String name = data['name'];
 
-    // ★ [수정 핵심] int가 아니라 num으로 받아서 소수점 에러 방지!
     num rawValue = data['value'];
-
-    // 소수점이 있으면 보여주고(.1), 없으면 정수로 표시
     String valueText = (rawValue % 1 == 0)
         ? "${rawValue.toInt()}%"
         : "${rawValue.toStringAsFixed(1)}%";
@@ -250,27 +247,26 @@ class _PentagonPainter extends CustomPainter {
 
     Paint borderPaint = Paint()
       ..color = color
-      ..strokeWidth = isMe ? 4 : 2
+      ..strokeWidth = isMe ? 5 : 3 // 테두리 두께 4/2 -> 5/3
       ..style = PaintingStyle.stroke;
 
     // 그림자
     canvas.drawCircle(
         center,
-        30,
+        45, // ★ 반지름
         Paint()
           ..color = Colors.grey.withOpacity(0.2)
           ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5));
 
-    // 원 그리기
-    canvas.drawCircle(center, 30, circlePaint);
-    canvas.drawCircle(center, 30, borderPaint);
+    canvas.drawCircle(center, 45, circlePaint);
+    canvas.drawCircle(center, 45, borderPaint);
 
-    // 텍스트 (이름) - 영어일 때 글자가 길어질 수 있으므로 조정
+    // 텍스트 (이름)
     TextSpan spanName = TextSpan(
       style: TextStyle(
           color: color,
-          fontSize: name.length > 3 ? 11 : 14, // 글자 길이에 따라 크기 조절
-          fontWeight: FontWeight.bold),
+          fontSize: name.length > 3 ? 16 : 18, // ★ 폰트 크기 11/14 -> 14/18
+          fontWeight: FontWeight.w900), // w900 (ExtraBold)
       text: name,
     );
     TextPainter tpName = TextPainter(
@@ -278,19 +274,24 @@ class _PentagonPainter extends CustomPainter {
         textAlign: TextAlign.center,
         textDirection: TextDirection.ltr);
     tpName.layout();
-    tpName.paint(canvas, Offset(center.dx - tpName.width / 2, center.dy - 8));
+    tpName.paint(canvas, Offset(center.dx - tpName.width / 2, center.dy - 12));
 
     // 텍스트 (값)
     TextSpan spanValue = TextSpan(
-      style: TextStyle(color: Colors.grey[600], fontSize: 10),
-      text: valueText, // 수정된 텍스트 사용
+      style: TextStyle(
+        color: Colors.grey[600],
+        fontSize: 15, // ★ 폰트 크기
+        fontWeight: FontWeight.bold,
+      ),
+      text: valueText,
     );
     TextPainter tpValue = TextPainter(
         text: spanValue,
         textAlign: TextAlign.center,
         textDirection: TextDirection.ltr);
     tpValue.layout();
-    tpValue.paint(canvas, Offset(center.dx - tpValue.width / 2, center.dy + 8));
+    tpValue.paint(
+        canvas, Offset(center.dx - tpValue.width / 2, center.dy + 10));
   }
 
   @override

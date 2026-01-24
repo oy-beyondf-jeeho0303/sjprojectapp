@@ -70,12 +70,12 @@ class AppLocale {
       'label_ji': 'Earth', // 지지 -> Earth Branch
       'label_shipseong': 'Deity', // 십성 -> Deity/Star
 
-      // Elements
-      'wood': 'Wood',
-      'fire': 'Fire',
-      'earth': 'Earth',
-      'metal': 'Metal',
-      'water': 'Water',
+      // 오행 - Elements
+      'wood': '목(Tree)',
+      'fire': '화(Fire)',
+      'earth': '토(Earth)',
+      'metal': '금(Metal)',
+      'water': '수(Water)',
 
       // Status
       'status_excess': 'Excess',
