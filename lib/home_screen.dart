@@ -7,6 +7,9 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:sj_project_app/services/purchase_service.dart';
 import 'package:sj_project_app/utils/localization_data.dart';
 import 'dart:ui' as ui; // 휴대폰 설정 접근용
+import 'package:sj_project_app/services/profile_service.dart'; // 프로필 서비스
+import 'package:sj_project_app/screens/profile_list_dialog.dart'; // 목록 팝업
+import 'package:uuid/uuid.dart';
 
 // ★ 파일 import 확인
 import 'city_data.dart';
@@ -159,6 +162,75 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // [기능 1] 저장하기
+  void _saveCurrentProfile() {
+    // 이름 입력받기 위한 다이얼로그
+    final nameController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("이름 저장"),
+        content: TextField(
+          controller: nameController,
+          decoration: const InputDecoration(hintText: "예: 남편, 우리 딸"),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context), child: const Text("취소")),
+          ElevatedButton(
+            onPressed: () async {
+              if (nameController.text.isEmpty) return;
+
+              // 프로필 객체 생성
+              final newProfile = SajuProfile(
+                id: DateTime.now().millisecondsSinceEpoch.toString(), // 간단 ID
+                name: nameController.text,
+                birthDate: _selectedDate,
+                birthTime: "${_selectedTime.hour}:${_selectedTime.minute}",
+                gender: _gender,
+                isLunar: _isLunar,
+              );
+
+              // 저장
+              await ProfileService().addProfile(newProfile);
+              if (mounted) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context)
+                    .showSnackBar(const SnackBar(content: Text("저장되었습니다!")));
+              }
+            },
+            child: const Text("확인"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // [기능 2] 불러오기
+  void _showLoadProfileDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => ProfileListDialog(
+        onSelect: (profile) {
+          // 선택된 사람 정보로 화면 갱신
+          setState(() {
+            _selectedDate = profile.birthDate;
+            // 시간 파싱 "13:30" -> TimeOfDay(13, 30)
+            final parts = profile.birthTime.split(":");
+            _selectedTime = TimeOfDay(
+                hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+            _gender = profile.gender;
+            _isLunar = profile.isLunar;
+
+            // 결과 초기화 (새로운 사람이니까)
+            _sajuDetail = null;
+            _fortuneReport = null;
+          });
+        },
+      ),
+    );
+  }
+
   String _getHangul(String? hanja) {
     const Map<String, String> map = {
       '甲': '갑',
@@ -271,6 +343,29 @@ class _HomeScreenState extends State<HomeScreen> {
       padding: const EdgeInsets.all(20),
       child: Column(
         children: [
+          // 1. [신규] 상단 헤더 & 불러오기 버튼
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                "기본 정보",
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              TextButton.icon(
+                icon: const Icon(Icons.folder_open, size: 20),
+                label: const Text("불러오기"),
+                onPressed: _showLoadProfileDialog,
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFF6C5CE7),
+                  textStyle: const TextStyle(
+                      fontSize: 15, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+
+          // 2. 기존 날짜/시간 입력
           Row(
             children: [
               Expanded(
@@ -307,6 +402,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
           const SizedBox(height: 15),
+
+          // 3. 기존 도시 검색
           InkWell(
             onTap: _openCitySearch,
             child: Container(
@@ -347,6 +444,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const SizedBox(height: 15),
+
+          // 4. 기존 성별 버튼
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
@@ -355,7 +454,24 @@ class _HomeScreenState extends State<HomeScreen> {
               _buildGenderBtn("여성", "F"),
             ],
           ),
-          const SizedBox(height: 20),
+
+          // 5. [신규] 저장 버튼 (분석 버튼 바로 위에 배치)
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              icon: const Icon(Icons.save_alt, size: 18),
+              label: const Text("현재 정보 저장"),
+              onPressed: _saveCurrentProfile, // ★ 아까 만든 함수 연결
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.grey[770],
+                textStyle:
+                    const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+
+          // 6. 기존 분석 시작 버튼
           SizedBox(
             width: double.infinity,
             height: 54,
@@ -379,7 +495,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
-
   // ============================================================
 
   Widget _buildPicker(
