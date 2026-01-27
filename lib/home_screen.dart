@@ -1,20 +1,27 @@
+import 'dart:io';
+import 'dart:typed_data';
 import 'dart:convert';
+import 'dart:ui' as ui; // 언어 감지용
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:sj_project_app/services/purchase_service.dart';
-import 'package:sj_project_app/utils/localization_data.dart';
-import 'dart:ui' as ui; // 휴대폰 설정 접근용
-import 'package:sj_project_app/services/profile_service.dart'; // 프로필 서비스
-import 'package:sj_project_app/screens/profile_list_dialog.dart'; // 목록 팝업
+import 'package:screenshot/screenshot.dart'; // 캡처 패키지
+import 'package:share_plus/share_plus.dart'; // 공유 패키지
+import 'package:path_provider/path_provider.dart'; // 경로 패키지
+import 'package:tosspayments_widget_sdk_flutter/model/payment_widget_options.dart';
 import 'package:uuid/uuid.dart';
 
-// ★ 파일 import 확인
+// 프로젝트 내부 파일 import
+import 'package:sj_project_app/services/purchase_service.dart';
+import 'package:sj_project_app/services/profile_service.dart';
+import 'package:sj_project_app/screens/profile_list_dialog.dart';
+import 'package:sj_project_app/utils/localization_data.dart';
 import 'city_data.dart';
 import 'five_elements.dart';
-import 'dart:ui' as ui; // 언어 감지용
+import '../screens/payment_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -24,7 +31,12 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final String baseUrl = "https://10.0.2.2:7033/api/Orders";
+  //final String baseUrl = "https://10.0.2.2:7033/api/Orders";  // PC 에뮬레이터 테스트 시
+  final String baseUrl =
+      "http://192.168.219.105:5110/api/Orders"; // 실제 서버 운영 시 수정 필
+
+  // ★ [수정] 캡처 컨트롤러를 여기(변수 선언부)로 옮겨서 에러를 방지했습니다.
+  final ScreenshotController _screenshotController = ScreenshotController();
 
   DateTime _selectedDate = DateTime(1981, 3, 3);
   TimeOfDay _selectedTime = const TimeOfDay(hour: 13, minute: 30);
@@ -34,35 +46,6 @@ class _HomeScreenState extends State<HomeScreen> {
   // 기본값은 한국어
   String _targetLanguage = "ko";
 
-  @override
-  void initState() {
-    super.initState();
-    _detectLanguage();
-  }
-
-  void _detectLanguage() {
-    // 기기 설정 언어 가져오기 (예: ko_KR, en_US)
-    Locale deviceLocale = ui.window.locale;
-
-    // ❌ [기존 코드 주석 처리] 에뮬레이터가 영어라고 해서 영어로 바꾸지 마!
-    /*
-    if (deviceLocale.languageCode != 'ko') {
-      setState(() {
-        _targetLanguage = 'en';
-      });
-      print("🌍 외국어 사용자 감지: English Mode Activated");
-    } else {
-      print("🇰🇷 한국어 사용자 감지");
-    }
-    */
-
-    // ✅ [수정 코드] 무조건 한국어로 고정!
-    setState(() {
-      _targetLanguage = 'ko';
-    });
-    print("🇰🇷 개발 모드: 강제 한국어 설정 완료");
-  }
-
   // 기본 도시
   City _selectedCity = globalCities[0];
 
@@ -70,6 +53,31 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? _sajuDetail;
   String? _fortuneReport;
 
+  @override
+  void initState() {
+    super.initState();
+    _detectLanguage();
+  }
+
+  void _detectLanguage() {
+    // 1. 기기의 현재 시스템 언어 가져오기
+    final Locale systemLocale =
+        WidgetsBinding.instance.platformDispatcher.locale;
+
+    setState(() {
+      _targetLanguage = systemLocale.languageCode == 'ko'
+          ? "ko"
+          : systemLocale.languageCode == "ja"
+              ? "ja"
+              : "en";
+    });
+
+    print("시스템 언어 감지: ${systemLocale.languageCode} -> 앱 설정: $_targetLanguage");
+  }
+
+  // ============================================================
+  // [기능 1] 서버 통신 및 데이터 저장
+  // ============================================================
   Future<void> _fetchSajuData([String? profileKey]) async {
     setState(() {
       _isLoading = true;
@@ -117,19 +125,62 @@ class _HomeScreenState extends State<HomeScreen> {
               _selectedDate, birthTime, _gender, _isLunar);
         }
 
-        // 내부 저장소에 데이터 캐싱 (다음번 로딩 0.1초 구현)
+        // 내부 저장소에 데이터 캐싱
         await PurchaseService().savePurchase(profileKey, data);
       } else {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("서버 오류: ${response.statusCode}")),
-          );
+          _showError("서버 오류: ${response.statusCode}");
         }
       }
     } catch (e) {
       if (mounted) {
+        _showError("서버 연결 실패: $e");
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // ============================================================
+  // [기능 2] 공유하기 (캡처 후 전송)
+  // ============================================================
+  Future<void> _shareResult() async {
+    // 결과가 없으면 공유 불가
+    if (_sajuDetail == null) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("서버 연결 실패: $e")),
+          const SnackBar(content: Text("먼저 운세를 분석해주세요!")),
+        );
+      }
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      // 화면 캡처
+      final Uint8List? image = await _screenshotController.capture();
+
+      if (image != null) {
+        // 임시 저장소 경로 확보
+        final directory = await getTemporaryDirectory();
+        final imagePath =
+            await File('${directory.path}/saju_result.png').create();
+
+        // 이미지 파일 저장
+        await imagePath.writeAsBytes(image);
+
+        // 공유 팝업 실행
+        await Share.shareXFiles(
+          [XFile(imagePath.path)],
+          text: '2026년 내 운세 분석 결과! (SJ Project)',
+        );
+      }
+    } catch (e) {
+      print("공유 실패: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("공유하기 실패: 권한을 확인해주세요.")),
         );
       }
     } finally {
@@ -139,29 +190,25 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _showError(String msg) {
     if (mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(msg), backgroundColor: Colors.red));
     }
   }
 
-  // ★★★ 여기가 에러 잡는 핵심 부분입니다 ★★★
+  // 도시 검색
   void _openCitySearch() async {
-    // 1. showSearch 뒤에 <City?>를 붙여서 "이 검색창은 City나 null을 뱉는다"고 알려줍니다.
     final City? result = await showSearch<City?>(
       context: context,
       delegate: CitySearchDelegate(),
     );
 
-    // 2. 결과가 null이 아닐 때만 업데이트
     if (result != null) {
       setState(() => _selectedCity = result);
     }
   }
 
-  // [기능 1] 저장하기
+  // [기능] 프로필 저장
   void _saveCurrentProfile() {
-    // 이름 입력받기 위한 다이얼로그
     final nameController = TextEditingController();
     showDialog(
       context: context,
@@ -178,9 +225,8 @@ class _HomeScreenState extends State<HomeScreen> {
             onPressed: () async {
               if (nameController.text.isEmpty) return;
 
-              // 프로필 객체 생성
               final newProfile = SajuProfile(
-                id: DateTime.now().millisecondsSinceEpoch.toString(), // 간단 ID
+                id: DateTime.now().millisecondsSinceEpoch.toString(),
                 name: nameController.text,
                 birthDate: _selectedDate,
                 birthTime: "${_selectedTime.hour}:${_selectedTime.minute}",
@@ -188,7 +234,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 isLunar: _isLunar,
               );
 
-              // 저장
               await ProfileService().addProfile(newProfile);
               if (mounted) {
                 Navigator.pop(context);
@@ -203,23 +248,20 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // [기능 2] 불러오기
+  // [기능] 프로필 불러오기
   void _showLoadProfileDialog() {
     showDialog(
       context: context,
       builder: (context) => ProfileListDialog(
         onSelect: (profile) {
-          // 선택된 사람 정보로 화면 갱신
           setState(() {
             _selectedDate = profile.birthDate;
-            // 시간 파싱 "13:30" -> TimeOfDay(13, 30)
             final parts = profile.birthTime.split(":");
             _selectedTime = TimeOfDay(
                 hour: int.parse(parts[0]), minute: int.parse(parts[1]));
             _gender = profile.gender;
             _isLunar = profile.isLunar;
 
-            // 결과 초기화 (새로운 사람이니까)
             _sajuDetail = null;
             _fortuneReport = null;
           });
@@ -256,58 +298,100 @@ class _HomeScreenState extends State<HomeScreen> {
     return map[hanja] ?? '';
   }
 
+  // ============================================================
+  // [메인 UI 빌드]
+  // ============================================================
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
       appBar: AppBar(
-        title: const Text(
-          "SJ Project",
-          style: TextStyle(
-            fontWeight: FontWeight.w800,
-            color: Color(0xFF2D3436),
-          ),
-        ),
+        // 제목도 다국어로 나오게 설정
+        title: Text(AppLocale.get(_targetLanguage, 'title'),
+            style: const TextStyle(
+                fontWeight: FontWeight.bold, color: Colors.black)),
         backgroundColor: Colors.white,
         elevation: 0,
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildHeader('header_input'), // "사주 정보 입력"
-            _buildInputCard(),
-            const SizedBox(height: 30),
-            if (_isLoading)
-              const Center(
-                child: CircularProgressIndicator(color: Colors.black87),
-              )
-            else if (_sajuDetail != null) ...[
-              _buildHeader('header_manse'),
-              _buildManseGrid(),
-              const SizedBox(height: 30),
-              _buildDaewoonList(),
-              const SizedBox(height: 20),
-              _buildSeunList(),
-              const SizedBox(height: 30),
-              _buildHeader('header_analysis'), // "오행 분석"
-              _buildAnalysisCard(),
-              const SizedBox(height: 30),
-              _buildHeader('header_yongsin'), // "용신"
-              _buildYongsinCard(),
-              const SizedBox(height: 30),
-              _buildHeader('header_diagram'), // "관계도"
-              FiveElementsDiagram(
-                elementRun: _sajuDetail!['elementRun'],
-                dayMasterElement: _sajuDetail!['dayMasterElement'],
-                targetLanguage: _targetLanguage,
+        centerTitle: true, // 제목 가운데 정렬
+        actions: [
+          // ★ [언어 선택 팝업 버튼]
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.language, color: Colors.black),
+            onSelected: (String value) {
+              setState(() {
+                _targetLanguage = value; // 선택한 언어로 변경
+              });
+              // (선택 사항) 언어 변경 시 안내 메시지
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                    content: Text("Language changed to $value"),
+                    duration: const Duration(milliseconds: 500)),
+              );
+            },
+            itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+              const PopupMenuItem<String>(
+                value: 'ko',
+                child: Text('🇰🇷 한국어'),
               ),
-              const SizedBox(height: 30),
-              _buildHeader('header_report'), // "리포트"
-              _buildReportCard(),
+              const PopupMenuItem<String>(
+                value: 'en',
+                child: Text('🇺🇸 English'),
+              ),
+              const PopupMenuItem<String>(
+                value: 'ja',
+                child: Text('🇯🇵 日本語'),
+              ),
             ],
-          ],
+          ),
+          const SizedBox(width: 10),
+        ],
+      ),
+      // ★ Screenshot 위젯으로 전체 감싸기
+      body: Screenshot(
+        controller: _screenshotController,
+        child: Container(
+          color: const Color(0xFFF5F6FA), // 배경색 지정 (캡처시 필수)
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.all(20.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildHeader('header_input'),
+                  _buildInputCard(),
+                  const SizedBox(height: 30),
+                  if (_isLoading)
+                    const Center(
+                      child: CircularProgressIndicator(color: Colors.black87),
+                    )
+                  else if (_sajuDetail != null) ...[
+                    _buildHeader('header_manse'),
+                    _buildManseGrid(),
+                    const SizedBox(height: 30),
+                    _buildDaewoonList(),
+                    const SizedBox(height: 20),
+                    _buildSeunList(),
+                    const SizedBox(height: 30),
+                    _buildHeader('header_analysis'), // "오행 분석"
+                    _buildAnalysisCard(),
+                    const SizedBox(height: 30),
+                    _buildHeader('header_yongsin'), // "용신"
+                    _buildYongsinCard(),
+                    const SizedBox(height: 30),
+                    _buildHeader('header_diagram'), // "관계도"
+                    FiveElementsDiagram(
+                      elementRun: _sajuDetail!['elementRun'],
+                      dayMasterElement: _sajuDetail!['dayMasterElement'],
+                      targetLanguage: _targetLanguage,
+                    ),
+                    const SizedBox(height: 30),
+                    _buildHeader('header_report'), // "리포트"
+                    _buildReportCard(),
+                  ],
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -317,7 +401,6 @@ class _HomeScreenState extends State<HomeScreen> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12, left: 4),
       child: Text(
-        // ★ 키를 받아서 언어에 맞는 텍스트로 변환
         AppLocale.get(_targetLanguage, key, params: params),
         style: const TextStyle(
           fontSize: 18,
@@ -328,6 +411,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // [입력 카드 위젯]
   Widget _buildInputCard() {
     return Container(
       decoration: BoxDecoration(
@@ -340,17 +424,18 @@ class _HomeScreenState extends State<HomeScreen> {
       padding: const EdgeInsets.all(20),
       child: Column(
         children: [
-          // 1. [신규] 상단 헤더 & 불러오기 버튼
+          // 1. 상단 헤더 & 불러오기 버튼
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                "기본 정보",
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              Text(
+                AppLocale.get(_targetLanguage, 'header_basic_info'),
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
               ),
               TextButton.icon(
                 icon: const Icon(Icons.folder_open, size: 20),
-                label: const Text("불러오기"),
+                label: Text(AppLocale.get(_targetLanguage, 'btn_load')),
                 onPressed: _showLoadProfileDialog,
                 style: TextButton.styleFrom(
                   foregroundColor: const Color(0xFF6C5CE7),
@@ -362,37 +447,45 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 10),
 
-          // 2. 기존 날짜/시간 입력
+          // 2. 날짜/시간 입력
+          // 2. 날짜 & 시간 선택 행
           Row(
             children: [
+              // 생년월일
               Expanded(
-                child: _buildPicker(
-                  "생년월일",
-                  DateFormat("yyyy.MM.dd").format(_selectedDate),
-                  Icons.calendar_today_outlined,
-                  () async {
-                    final d = await showDatePicker(
+                child: _buildTimePickerField(
+                  label: AppLocale.get(
+                      _targetLanguage, 'label_birthdate'), // "생년월일"
+                  value: DateFormat('yyyy.MM.dd').format(_selectedDate),
+                  icon: Icons.calendar_today_outlined,
+                  onTap: () async {
+                    final date = await showDatePicker(
                       context: context,
                       initialDate: _selectedDate,
                       firstDate: DateTime(1900),
                       lastDate: DateTime.now(),
+                      // 달력도 한국어/영어로 나오게 설정
+                      locale: Locale(
+                          _targetLanguage == 'ja' ? 'ja' : _targetLanguage),
                     );
-                    if (d != null) setState(() => _selectedDate = d);
+                    if (date != null) setState(() => _selectedDate = date);
                   },
                 ),
               ),
-              const SizedBox(width: 15),
+              const SizedBox(width: 12),
+              // 태어난 시
               Expanded(
-                child: _buildPicker(
-                  "태어난 시",
-                  _selectedTime.format(context),
-                  Icons.access_time,
-                  () async {
-                    final t = await showTimePicker(
+                child: _buildTimePickerField(
+                  label: AppLocale.get(
+                      _targetLanguage, 'label_birthtime'), // "태어난 시"
+                  value: _selectedTime.format(context),
+                  icon: Icons.access_time_outlined,
+                  onTap: () async {
+                    final time = await showTimePicker(
                       context: context,
                       initialTime: _selectedTime,
                     );
-                    if (t != null) setState(() => _selectedTime = t);
+                    if (time != null) setState(() => _selectedTime = time);
                   },
                 ),
               ),
@@ -400,66 +493,74 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 15),
 
-          // 3. 기존 도시 검색
-          InkWell(
-            onTap: _openCitySearch,
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 15),
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey.shade200),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.location_city,
-                    size: 20,
-                    color: Colors.black54,
+          // 3. 태어난 도시
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8F9FA),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFE9ECEF)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  AppLocale.get(_targetLanguage, 'label_city'), // "태어난 도시"
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                    fontWeight: FontWeight.w500,
                   ),
-                  const SizedBox(width: 10),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                ),
+                const SizedBox(height: 4),
+                InkWell(
+                  onTap: _showCitySearchDialog,
+                  child: Row(
                     children: [
-                      Text(
-                        "태어난 도시 (위도/경도 보정)",
-                        style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        "${_selectedCity.country}, ${_selectedCity.name}",
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
+                      const Icon(Icons.location_city,
+                          size: 20, color: Color(0xFF2D3436)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          // 도시 이름은 번역하기 어려우니 그대로 둡니다 (또는 별도 처리)
+                          "${_selectedCity.country}, ${_selectedCity.name}",
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF2D3436),
+                          ),
                         ),
                       ),
+                      const Icon(Icons.search, color: Colors.grey),
                     ],
                   ),
-                  const Spacer(),
-                  const Icon(Icons.search, color: Colors.blueGrey),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 15),
+          const SizedBox(height: 20),
 
-          // 4. 기존 성별 버튼
+          // 4. 성별 버튼
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _buildGenderBtn("남성", "M"),
+              _buildGenderBtn(
+                  AppLocale.get(_targetLanguage, 'gender_male'), "M"),
               const SizedBox(width: 10),
-              _buildGenderBtn("여성", "F"),
+              _buildGenderBtn(
+                  AppLocale.get(_targetLanguage, 'gender_female'), "F"),
             ],
           ),
 
-          // 5. [신규] 저장 버튼 (분석 버튼 바로 위에 배치)
+          // 5. 저장 버튼
           const SizedBox(height: 10),
           Align(
             alignment: Alignment.centerRight,
             child: TextButton.icon(
               icon: const Icon(Icons.save_alt, size: 18),
-              label: const Text("현재 정보 저장"),
-              onPressed: _saveCurrentProfile, // ★ 아까 만든 함수 연결
+              label: Text(AppLocale.get(
+                  _targetLanguage, 'btn_save_info')), // "현재 정보 저장"
+              onPressed: _saveCurrentProfile,
               style: TextButton.styleFrom(
                 foregroundColor: Colors.grey[770],
                 textStyle:
@@ -468,7 +569,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
 
-          // 6. 기존 분석 시작 버튼
+          // 6. 분석 시작 버튼
           SizedBox(
             width: double.infinity,
             height: 54,
@@ -482,17 +583,184 @@ class _HomeScreenState extends State<HomeScreen> {
                   borderRadius: BorderRadius.circular(16),
                 ),
               ),
-              child: const Text(
-                "운세 분석 시작",
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
-              ),
+              child: _isLoading
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(
+                          color: Colors.white, strokeWidth: 2),
+                    )
+                  : Text(
+                      AppLocale.get(
+                          _targetLanguage, 'btn_analyze'), // "운세 분석 시작"
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
             ),
           ),
         ],
       ),
     );
   }
-  // ============================================================
+
+  // 1. 날짜/시간 선택 버튼 디자인 함수
+  Widget _buildTimePickerField({
+    required String label,
+    required String value,
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            color: Colors.grey[600],
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(height: 4),
+        InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8F9FA),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE9ECEF)),
+            ),
+            child: Row(
+              children: [
+                Icon(icon, size: 20, color: const Color(0xFF2D3436)),
+                const SizedBox(width: 8),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                    color: Color(0xFF2D3436),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // 2. 성별 선택 버튼 디자인 함수
+  Widget _buildGenderOption(String genderCode, String label) {
+    bool isSelected = _gender == genderCode;
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _gender = genderCode;
+        });
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFF6C5CE7) : Colors.white,
+          borderRadius: BorderRadius.circular(30),
+          border: Border.all(
+            color: isSelected ? const Color(0xFF6C5CE7) : Colors.grey.shade300,
+          ),
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: const Color(0xFF6C5CE7).withOpacity(0.4),
+                    blurRadius: 8,
+                    offset: const Offset(0, 4),
+                  )
+                ]
+              : [],
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? Colors.white : Colors.grey[600],
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+          ),
+        ),
+      ),
+    );
+  }
+
+  // [수정] 도시 검색 다이얼로그 (기존 데이터 globalCities 활용)
+  void _showCitySearchDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: Colors.white,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text(
+            AppLocale.get(_targetLanguage, 'label_city'), // "태어난 도시" 타이틀
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: 300, // 리스트 높이 제한
+            child: ListView.builder(
+              shrinkWrap: true,
+              // ★ 기존에 만드신 'globalCities' 리스트를 여기서 씁니다.
+              itemCount: globalCities.length,
+              itemBuilder: (context, index) {
+                final city = globalCities[index];
+                return ListTile(
+                  leading: const Icon(Icons.location_on_outlined,
+                      color: Colors.grey),
+                  title: Text(
+                    "${city.country}, ${city.name}", // 예: 대한민국, 서울
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                  trailing: Text(
+                    "GMT ${city.timezone >= 0 ? '+' : ''}${city.timezone}",
+                    style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                  ),
+                  onTap: () {
+                    // 선택 시 상태 업데이트 및 창 닫기
+                    setState(() {
+                      _selectedCity = city;
+                    });
+                    Navigator.pop(context);
+                  },
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text("Close", style: TextStyle(color: Colors.grey)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // 4. 저장/불러오기 기능 (에러 방지용 빈 함수)
+  void _saveCurrentData() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("현재 정보가 저장되었습니다.")),
+    );
+  }
+
+  void _loadSavedData() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("저장된 정보를 불러왔습니다.")),
+    );
+  }
 
   Widget _buildPicker(
     String label,
@@ -557,7 +825,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // [1. 전체 틀 수정] 좌측 라벨 컬럼 추가
+  // [만세력 그리드 위젯]
   Widget _buildManseGrid() {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 4),
@@ -573,14 +841,10 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      // IntrinsicHeight: 자식들의 높이를 가장 높은 놈(내용물)에 맞춤
       child: IntrinsicHeight(
         child: Row(
           children: [
-            // ★★★ [신규] 좌측 라벨 (천간, 지지 등 이름표) ★★★
             _buildTableLabelColumn(),
-
-            // 우측 데이터 (시, 일, 월, 연)
             _buildTablePillar(AppLocale.get(_targetLanguage, "label_siju"),
                 _sajuDetail!['time'],
                 isLast: false),
@@ -602,18 +866,17 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // [신규] 대운 흐름 리스트 (가로 스크롤)
+  // [수정] 대운 리스트 (배경 연하게 + 글자 오행색 복구)
   Widget _buildDaewoonList() {
     if (_sajuDetail == null || _sajuDetail!['daewoonList'] == null)
       return const SizedBox();
 
     List<dynamic> daewoonList = _sajuDetail!['daewoonList'];
-    int daewoonNum = _sajuDetail!['daewoonNum'] ?? 4; // 기본값
+    int daewoonNum = _sajuDetail!['daewoonNum'] ?? 4;
 
-    // 현재 내 나이 계산 (만 나이 대략 계산)
     int currentYear = DateTime.now().year;
     int birthYear = _selectedDate.year;
-    int myAge = currentYear - birthYear + 1; // 한국식 세는 나이 기준 (대운은 보통 세는 나이 표기)
+    int myAge = currentYear - birthYear + 1;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -632,52 +895,40 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
-          physics: const BouncingScrollPhysics(), // 부드러운 스크롤
+          physics: const BouncingScrollPhysics(),
           child: Row(
             children: daewoonList.map((dw) {
               int age = dw['age'];
-              // 현재 대운인지 확인 (내 나이가 대운 범위 안에 있는지)
               bool isCurrent = myAge >= age && myAge < (age + 10);
+              int startYear = birthYear + (age - 1); // 대운 시작 연도
 
               return Container(
-                width: 50,
+                width: 62, // 너비 유지
                 margin: const EdgeInsets.only(right: 6),
-                padding: const EdgeInsets.symmetric(
-                  vertical: 12,
-                  horizontal: 10,
-                ),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
                 decoration: BoxDecoration(
-                  color: isCurrent
-                      ? const Color(0xFF2D3436)
-                      : Colors.white, // 현재 대운은 검은색 배경
+                  // ★ [수정] 배경색: 선택되면 연한 회색, 아니면 흰색
+                  color: isCurrent ? Colors.grey[200] : Colors.white,
                   borderRadius: BorderRadius.circular(12),
+                  // ★ [수정] 테두리: 선택되면 진한색으로 강조
                   border: Border.all(
                     color: isCurrent
                         ? const Color(0xFF2D3436)
                         : Colors.grey.shade300,
+                    width: isCurrent ? 1.5 : 1.0, // 선택되면 조금 더 두껍게
                   ),
-                  boxShadow: isCurrent
-                      ? [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.2),
-                            blurRadius: 6,
-                            offset: const Offset(0, 3),
-                          ),
-                        ]
-                      : [],
                 ),
                 child: Column(
                   children: [
-                    // 간지 (한자)
                     Text(
                       dw['gan']['hanja'],
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
                         fontFamily: "Serif",
-                        color: isCurrent
-                            ? Colors.white
-                            : _parseColor(dw['gan']['color']),
+                        // ★ [수정] 글자색: 무조건 오행 색상 사용
+                        color: _parseColor(dw['gan']['color']),
                       ),
                     ),
                     Text(
@@ -686,22 +937,19 @@ class _HomeScreenState extends State<HomeScreen> {
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
                         fontFamily: "Serif",
-                        color: isCurrent
-                            ? Colors.white
-                            : _parseColor(dw['ji']['color']),
+                        // ★ [수정] 글자색: 무조건 오행 색상 사용
+                        color: _parseColor(dw['ji']['color']),
                       ),
                     ),
-                    const SizedBox(height: 6),
-                    // 나이 (숫자)
+                    const SizedBox(height: 8),
+
+                    // 나이 박스
                     Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
+                          horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: isCurrent
-                            ? Colors.white.withOpacity(0.2)
-                            : Colors.grey[100],
+                        // 나이 배경도 톤에 맞춰 조정
+                        color: isCurrent ? Colors.white : Colors.grey[100],
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
@@ -709,8 +957,20 @@ class _HomeScreenState extends State<HomeScreen> {
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
-                          color: isCurrent ? Colors.white : Colors.grey[600],
+                          color: Colors.black87,
                         ),
+                      ),
+                    ),
+
+                    // 연도 텍스트
+                    const SizedBox(height: 2),
+                    Text(
+                      "($startYear)",
+                      style: TextStyle(
+                        fontSize: 10,
+                        // 선택된 항목의 연도를 좀 더 진하게
+                        color: isCurrent ? Colors.black54 : Colors.grey[400],
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                   ],
@@ -723,7 +983,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // [신규] 세운(연운) 리스트
+  // [수정] 세운 리스트 (배경 연하게 + 글자 오행색 복구)
   Widget _buildSeunList() {
     if (_sajuDetail == null || _sajuDetail!['seunList'] == null)
       return const SizedBox();
@@ -735,10 +995,10 @@ class _HomeScreenState extends State<HomeScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: EdgeInsets.only(left: 4, bottom: 8),
+          padding: const EdgeInsets.only(left: 4, bottom: 8, top: 20),
           child: Text(
             AppLocale.get(_targetLanguage, 'header_seun'),
-            style: TextStyle(
+            style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.bold,
               color: Color(0xFF2D3436),
@@ -749,78 +1009,63 @@ class _HomeScreenState extends State<HomeScreen> {
           scrollDirection: Axis.horizontal,
           physics: const BouncingScrollPhysics(),
           child: Row(
-            children: seunList.map((seun) {
-              int year = seun['year'];
+            children: seunList.map((sw) {
+              int year = sw['year'];
               bool isCurrent = (year == currentYear);
 
               return Container(
-                width: 50, // ★ 60 -> 50으로 줄임 (더 슬림하게!)
-                margin: const EdgeInsets.only(right: 6), // 간격도 8->6으로 살짝 줄임
-                padding: const EdgeInsets.symmetric(vertical: 12),
+                width: 62, // 대운과 너비 통일
+                margin: const EdgeInsets.only(right: 6),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
                 decoration: BoxDecoration(
-                  color: isCurrent ? const Color(0xFF3F51B5) : Colors.white,
-                  borderRadius: BorderRadius.circular(
-                    10,
-                  ), // 모서리도 살짝 덜 둥글게 (비율 맞춤)
+                  // ★ [수정] 배경: 연한 회색
+                  color: isCurrent ? Colors.grey[200] : Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  // ★ [수정] 테두리
                   border: Border.all(
                     color: isCurrent
-                        ? const Color(0xFF3F51B5)
+                        ? const Color(0xFF2D3436)
                         : Colors.grey.shade300,
+                    width: isCurrent ? 1.5 : 1.0,
                   ),
-                  boxShadow: isCurrent
-                      ? [
-                          BoxShadow(
-                            color: Colors.blue.withOpacity(0.3),
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
-                          ),
-                        ]
-                      : [],
                 ),
                 child: Column(
                   children: [
                     Text(
-                      seun['gan']['hanja'],
-                      style: TextStyle(
-                        fontSize: 20, // 폭이 좁아지니 글자도 22->20으로 살짝 조정
-                        fontWeight: FontWeight.bold,
-                        fontFamily: "Serif",
-                        color: isCurrent
-                            ? Colors.white
-                            : _parseColor(seun['gan']['color']),
-                        height: 1.0,
-                      ),
-                    ),
-                    Text(
-                      seun['ji']['hanja'],
+                      sw['gan']['hanja'],
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
                         fontFamily: "Serif",
-                        color: isCurrent
-                            ? Colors.white
-                            : _parseColor(seun['ji']['color']),
-                        height: 1.0,
+                        // ★ [수정] 오행 색상 복구
+                        color: _parseColor(sw['gan']['color']),
                       ),
                     ),
-                    const SizedBox(height: 6),
+                    Text(
+                      sw['ji']['hanja'],
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        fontFamily: "Serif",
+                        // ★ [수정] 오행 색상 복구
+                        color: _parseColor(sw['ji']['color']),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 2,
-                        vertical: 2,
-                      ), // 내부 여백 최소화
+                          horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: isCurrent
-                            ? Colors.white.withOpacity(0.2)
-                            : Colors.grey[100],
+                        color: isCurrent ? Colors.white : Colors.grey[100],
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
                         "$year",
                         style: TextStyle(
-                          fontSize: 10, // 연도 글자 크기 11->10 (폭에 맞춤)
+                          fontSize: 12,
                           fontWeight: FontWeight.bold,
-                          color: isCurrent ? Colors.white : Colors.grey[600],
+                          color: Colors.black87,
                         ),
                       ),
                     ),
@@ -834,7 +1079,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // [3. 우측 데이터 기둥 수정]
   Widget _buildTablePillar(
     String label,
     Map<String, dynamic> data, {
@@ -843,14 +1087,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }) {
     return Expanded(
       child: Container(
-        // ❌ [삭제] 여기에 color를 두면 decoration과 충돌합니다!
-        // color: isMe ? const Color(0xFFFFFDE7) : Colors.transparent,
-
-        // ✅ [수정] decoration 안으로 color를 옮깁니다.
         decoration: BoxDecoration(
-          color: isMe
-              ? const Color(0xFFFFFDE7)
-              : Colors.transparent, // ★ 여기로 이사 옴!
+          color: isMe ? const Color(0xFFFFFDE7) : Colors.transparent,
           border: isLast
               ? null
               : Border(
@@ -859,7 +1097,6 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         child: Column(
           children: [
-            // 1. 헤더
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Text(
@@ -873,8 +1110,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const Divider(height: 1, thickness: 1, color: Color(0xFFEEEEEE)),
-
-            // 2. 천간 데이터
             const SizedBox(height: 12),
             Expanded(
               flex: 3,
@@ -893,10 +1128,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const SizedBox(height: 12),
-
             const Divider(height: 1, thickness: 1, color: Color(0xFFBDBDBD)),
-
-            // 3. 지지 데이터
             const SizedBox(height: 12),
             Expanded(
               flex: 3,
@@ -918,7 +1150,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // [수정 3] 글자 위젯 (큰 한자 + 작은 한글)
   Widget _buildGridChar(String? hanja, String? colorHex) {
     Color color = _parseColor(colorHex);
     String hangul = _getHangul(hanja);
@@ -928,9 +1159,9 @@ class _HomeScreenState extends State<HomeScreen> {
         Text(
           hanja ?? "",
           style: TextStyle(
-            fontSize: 32, // 글자 크기 확대
+            fontSize: 32,
             fontWeight: FontWeight.bold,
-            fontFamily: "Serif", // 명조체 느낌
+            fontFamily: "Serif",
             color: color,
             height: 1.0,
           ),
@@ -948,12 +1179,11 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // [2. 좌측 라벨 기둥 구현] 우측 데이터와 높이/간격을 100% 동기화
   Widget _buildTableLabelColumn() {
     return Container(
-      width: 40, // 라벨 칸 너비
+      width: 40,
       decoration: BoxDecoration(
-        color: Colors.grey[50], // 아주 연한 회색 배경 (구분감)
+        color: Colors.grey[50],
         borderRadius: const BorderRadius.only(
           topLeft: Radius.circular(12),
           bottomLeft: Radius.circular(12),
@@ -964,20 +1194,15 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       child: Column(
         children: [
-          // 1. 헤더 높이 맞춤 (내용 없음)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 8),
             child: Text(
               "",
               style: TextStyle(fontSize: 13, height: 1.0),
-            ), // 높이 점유용
+            ),
           ),
-
           const Divider(height: 1, thickness: 1, color: Color(0xFFEEEEEE)),
-
-          // ================= 천간 라벨 =================
-          const SizedBox(height: 12), // 우측과 동일한 여백
-          // 큰 글자(한자) 위치에 '천간' 배치
+          const SizedBox(height: 12),
           Expanded(
             flex: 3,
             child: Container(
@@ -993,9 +1218,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const SizedBox(height: 4),
-          // 십성 위치에 '십성' 배치
           Container(
-            height: 20, // 우측 십성 텍스트 대략적 높이
+            height: 20,
             alignment: Alignment.center,
             child: Text(
               AppLocale.get(_targetLanguage, 'label_shipseong'),
@@ -1003,13 +1227,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const SizedBox(height: 12),
-
-          // 구분선
           const Divider(height: 1, thickness: 1, color: Color(0xFFBDBDBD)),
-
-          // ================= 지지 라벨 =================
           const SizedBox(height: 12),
-          // 큰 글자(한자) 위치에 '지지' 배치
           Expanded(
             flex: 3,
             child: Container(
@@ -1025,7 +1244,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const SizedBox(height: 4),
-          // 십성 위치에 '십성' 배치
           Container(
             height: 20,
             alignment: Alignment.center,
@@ -1040,10 +1258,8 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // [수정 4] 십성 위젯 (깔끔한 텍스트)
   Widget _buildGridShipseong(String? text) {
     if (text == null || text.isEmpty) return const SizedBox();
-    // 2. ★ [핵심] 번역 적용 (한글 '편관' -> 영어 'Power')
     String translatedText = AppLocale.get(_targetLanguage, text);
 
     return Container(
@@ -1056,146 +1272,6 @@ class _HomeScreenState extends State<HomeScreen> {
         translatedText,
         style: TextStyle(
           fontSize: 11,
-          color: Colors.grey[700],
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLeftLabelColumn() {
-    return Padding(
-      padding: const EdgeInsets.only(right: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          const SizedBox(height: 20),
-          const SizedBox(height: 12),
-          _buildLabelText("천간"),
-          const SizedBox(height: 6),
-          _buildLabelText("십성", isSmall: true),
-          const SizedBox(height: 14),
-          _buildLabelText("지지"),
-          const SizedBox(height: 6),
-          _buildLabelText("십성", isSmall: true),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLabelText(String text, {bool isSmall = false}) {
-    return Container(
-      height: isSmall ? 24 : 52,
-      alignment: Alignment.center,
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: isSmall ? 11 : 13,
-          fontWeight: FontWeight.bold,
-          color: Colors.grey[600],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPillar(
-    String label,
-    Map<String, dynamic> data, {
-    bool isMe = false,
-  }) {
-    return Column(
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            color: Colors.grey[500],
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 12),
-        _buildCharBox(data['gan'], isMe),
-        const SizedBox(height: 6),
-        SizedBox(
-          height: 24,
-          child: _buildShipseongTag(data['gan']['shipseong']),
-        ),
-        const SizedBox(height: 14),
-        _buildCharBox(data['ji'], false),
-        const SizedBox(height: 6),
-        SizedBox(
-          height: 24,
-          child: _buildShipseongTag(data['ji']['shipseong']),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildCharBox(Map<String, dynamic> charData, bool isMe) {
-    Color elementColor = _parseColor(charData['color']);
-    String hanja = charData['hanja'] ?? "";
-    String hangul = _getHangul(hanja);
-    return Container(
-      width: 52,
-      height: 52,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: isMe ? const Color(0xFFFFF9C4) : Colors.white,
-        shape: BoxShape.circle,
-        border: Border.all(
-          color: isMe ? const Color(0xFFFFD54F) : elementColor,
-          width: isMe ? 2 : 1.5,
-        ),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Text(
-            hanja,
-            style: const TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.w600,
-              fontFamily: "Serif",
-              color: Colors.black87,
-              height: 1.0,
-            ),
-          ),
-          const SizedBox(width: 2),
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: Text(
-              hangul,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                color: Colors.grey[600],
-                height: 1.0,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildShipseongTag(String? text) {
-    if (text == null || text.isEmpty) return const SizedBox();
-
-    // ★ [수정] 변수 선언이 빠져 있었습니다! 여기서 선언합니다.
-    String translatedText = AppLocale.get(_targetLanguage, text);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.grey[100],
-        borderRadius: BorderRadius.circular(8),
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        translatedText,
-        style: TextStyle(
-          fontSize: _targetLanguage == 'en' ? 9 : 10,
           color: Colors.grey[700],
           fontWeight: FontWeight.bold,
         ),
@@ -1223,7 +1299,7 @@ class _HomeScreenState extends State<HomeScreen> {
             child: PieChart(
               PieChartData(
                 sectionsSpace: 0,
-                centerSpaceRadius: 30,
+                centerSpaceRadius: 33,
                 sections: [
                   _makeSection(run['목'], const Color(0xFF4CAF50)),
                   _makeSection(run['화'], const Color(0xFFF44336)),
@@ -1234,7 +1310,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-          const SizedBox(width: 30),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               children: [
@@ -1261,24 +1337,17 @@ class _HomeScreenState extends State<HomeScreen> {
     return PieChartSectionData(
       color: color,
       value: val,
-      radius: 20,
+      radius: 22,
       showTitle: false,
     );
   }
 
   Widget _buildAnalysisRow(String label, dynamic value, Color color) {
     double val = (value is int) ? value.toDouble() : (value as double);
-    //  String status = val > 35 ? "과다" : (val < 10 ? "부족" : "적정");
-
-    // 1. 상태(과다/부족) 다국어 처리
     String statusKey = val > 35
         ? 'status_excess'
         : (val < 10 ? 'status_lack' : 'status_proper');
     String statusText = AppLocale.get(_targetLanguage, statusKey);
-
-    // 2. 오행 라벨(목, 화...) 다국어 처리
-    String elemKey = _getElemKey(label);
-    String elemText = AppLocale.get(_targetLanguage, elemKey);
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
@@ -1301,7 +1370,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
           Text(
-            "${val.toInt()}% ($statusText)", // 50% (Excess)
+            "${val.toInt()}% ($statusText)",
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.bold,
@@ -1313,15 +1382,12 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // [수정] 용신 카드 (다국어 완벽 적용)
   Widget _buildYongsinCard() {
     if (_sajuDetail == null) return const SizedBox();
 
-    // 서버에서 받은 원본 데이터 (예: "수", "금")
     String yongsin = _sajuDetail!['yongsin'] ?? "알 수 없음";
     String dayMasterElem = _sajuDetail!['dayMasterElement'] ?? "";
 
-    // ★ [핵심] 한글 오행 -> 영어 키(wood, fire...)로 변환 -> 다국어 텍스트 가져오기
     String yongsinKey = _getElemKey(yongsin);
     String dayMasterKey = _getElemKey(dayMasterElem);
 
@@ -1342,7 +1408,6 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       child: Row(
         children: [
-          // 왼쪽 원형 아이콘
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -1350,9 +1415,8 @@ class _HomeScreenState extends State<HomeScreen> {
               shape: BoxShape.circle,
             ),
             child: Text(
-              yongsinTrans, // 번역된 텍스트 (Water / 수)
+              yongsinTrans,
               style: TextStyle(
-                // 영문일 경우 글자가 길어서 폰트 조정
                 fontSize: _targetLanguage == 'en' ? 15 : 30,
                 fontWeight: FontWeight.bold,
                 color: yColor,
@@ -1360,12 +1424,10 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const SizedBox(width: 20),
-          // 오른쪽 설명 텍스트
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // "To support your Day Master (Metal),"
                 Text(
                   AppLocale.get(_targetLanguage, 'yongsin_desc_1',
                       params: {'elem': dayMasterElemTrans}),
@@ -1382,7 +1444,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         color: yColor,
                       ),
                     ),
-                    // " energy is needed."
                     Text(
                       AppLocale.get(_targetLanguage, 'yongsin_desc_2'),
                       style: const TextStyle(
@@ -1393,7 +1454,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
                 const SizedBox(height: 5),
-                // "Using this element balances your life."
                 Text(
                   AppLocale.get(_targetLanguage, 'yongsin_sub'),
                   style: TextStyle(fontSize: 12, color: Colors.grey[500]),
@@ -1406,8 +1466,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ★★★ [신규 추가] 오행 한글 이름을 키값(wood, fire)으로 바꾸는 함수
-  // 이 함수가 없으면 _buildYongsinCard에서 에러가 납니다!
   String _getElemKey(String korName) {
     if (korName.contains('목')) return 'wood';
     if (korName.contains('화')) return 'fire';
@@ -1417,17 +1475,18 @@ class _HomeScreenState extends State<HomeScreen> {
     return 'unknown';
   }
 
-  // [수정] 운세 리포트 카드 (매거진 스타일 UI)
+  // [수정] 상세 운세 리포트 카드 (기존 디자인 유지 + 왼쪽 정렬 고정)
   Widget _buildReportCard() {
+    // 데이터가 없으면 빈 공간 표시
     if (_fortuneReport == null) return const SizedBox();
 
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(24), // 내부 여백 넉넉하게
+      width: double.infinity, // 가로로 꽉 채우기
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16), // 둥근 모서리
-        border: Border.all(color: Colors.grey.shade200), // 연한 테두리
+        borderRadius: BorderRadius.circular(16), // 기존 둥근 모서리 유지
+        border: Border.all(color: Colors.grey.shade200),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.03),
@@ -1437,15 +1496,17 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       child: Column(
+        // ★★★ [핵심] 글자들을 왼쪽(Start)으로 정렬 ★★★
+        // 이 한 줄이 없어서 가운데 정렬(시 처럼) 되었던 것입니다.
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 1. 리포트 헤더 (아이콘 + 제목)
+          // 1. 헤더 (아이콘 + 제목)
           Row(
             children: [
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFE3F2FD), // 연한 파란색 배경
+                  color: const Color(0xFFE3F2FD),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Icon(
@@ -1455,13 +1516,12 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               const SizedBox(width: 12),
-              const Text(
-                "상세 운세 분석",
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF2D3436),
-                ),
+              Text(
+                AppLocale.get(_targetLanguage, 'header_report'), // "상세 운세 리포트"
+                style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF2D3436)),
               ),
             ],
           ),
@@ -1469,41 +1529,50 @@ class _HomeScreenState extends State<HomeScreen> {
           const Divider(height: 1, thickness: 1, color: Color(0xFFEEEEEE)),
           const SizedBox(height: 20),
 
-          // 2. HTML 본문 렌더링 (스타일링 적용)
+          // 2. HTML 내용 (왼쪽 정렬 적용)
           HtmlWidget(
             _fortuneReport ?? "",
             textStyle: const TextStyle(
               fontSize: 15,
-              height: 1.8, // 줄 간격을 넓혀서 읽기 편하게 (1.8배)
-              color: Color(0xFF424242), // 너무 까만색보다 진한 회색이 눈이 편함
-              letterSpacing: -0.2, // 자간을 살짝 좁혀서 단단한 느낌
+              height: 1.8, // 줄 간격 시원하게
+              color: Color(0xFF424242),
+              letterSpacing: -0.2,
             ),
+            // 태그별 스타일 지정 (기존 코드 유지하되 왼쪽 정렬 확실히 적용)
             customStylesBuilder: (element) {
-              // HTML 태그별 커스텀 스타일
+              // 제목(h3) 스타일
               if (element.localName == 'h3') {
                 return {
                   'font-size': '18px',
                   'font-weight': 'bold',
-                  'color': '#1565C0', // 제목은 파란색 계열로 강조
+                  'color': '#1565C0',
                   'margin-top': '24px',
                   'margin-bottom': '12px',
-                  'border-bottom': '2px solid #E3F2FD', // 제목 아래 밑줄 장식
+                  'border-bottom': '2px solid #E3F2FD',
                   'padding-bottom': '4px',
-                  'display': 'inline-block', // 밑줄 길이를 글자에 맞춤
+                  'display': 'block', // 블록 요소로 처리
+                  'text-align': 'left', // ★ 왼쪽 정렬 강제
                 };
               }
+              // 강조(b, strong) 스타일
               if (element.localName == 'b' || element.localName == 'strong') {
-                return {'color': '#212121', 'font-weight': '700'}; // 강조 텍스트 진하게
+                return {'color': '#212121', 'font-weight': '700'};
               }
+              // 리스트(li) 간격
               if (element.localName == 'li') {
-                return {'margin-bottom': '8px'}; // 리스트 항목 간격
+                return {
+                  'margin-bottom': '8px',
+                  'text-align': 'left' // ★ 왼쪽 정렬 강제
+                };
               }
-              return null;
+              // 기본적으로 왼쪽 정렬
+              return {'text-align': 'left'};
             },
           ),
 
-          // 3. 하단 안내 문구 (선택 사항)
           const SizedBox(height: 30),
+
+          // 3. 하단 안내 문구
           Container(
             padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
             decoration: BoxDecoration(
@@ -1555,10 +1624,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ============================================================
-  // ★★★ [수정됨] 결제 체크 및 분석 시작 로직 ★★★
+  // [결제 체크 및 분석 시작 로직]
   // ============================================================
   void _onAnalyzePressed() async {
-    // 2. 고유 키 생성
     final purchaseService = PurchaseService();
     String birthTimeStr =
         "${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}";
@@ -1570,14 +1638,13 @@ class _HomeScreenState extends State<HomeScreen> {
       _isLunar,
     );
 
-    // 3. 내부 저장소 확인 (결제 여부 + 데이터 유무)
     bool isPurchased = await purchaseService.isPurchased(profileKey);
 
     if (isPurchased) {
-      // [CASE A] 결제 내역 있음 -> 데이터 확인
+      // 결제 내역 있음 -> 캐시 확인
       var savedData = await purchaseService.getSavedData(profileKey);
 
-      // 데이터가 있고 && 언어가 같으면 -> 캐시 사용 (서버 호출 X)
+      // 데이터가 있고 언어가 같으면 서버 호출 없이 캐시 사용
       if (savedData != null && savedData['lang'] == _targetLanguage) {
         setState(() {
           _sajuDetail = savedData['sajuDetail'];
@@ -1586,53 +1653,232 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
-      // 데이터 갱신 필요 -> 서버 호출
+      // 데이터가 없거나 갱신 필요하면 서버 호출
       _fetchSajuData(profileKey);
     } else {
-      // [CASE B] 결제 안 함 -> 결제 화면으로
+      // 결제 안 함 -> 결제 화면으로
       _showPaymentScreen(profileKey);
     }
   }
 
+  // [토스페이먼츠] 결제 화면 호출
   void _showPaymentScreen(String profileKey) async {
-    // ★ [임시 수정] 결제 화면 대신 '테스트용 팝업'을 띄웁니다.
-    bool? isConfirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("결제 (테스트 모드)"),
-        content: const Text("아직 결제 모듈이 연동되지 않았습니다.\n무료로 분석을 진행하시겠습니까?"),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false), // 취소
-            child: const Text("취소"),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true), // 승인
-            style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF2D3436)),
-            child: const Text("무료로 진행"),
-          ),
-        ],
+    // 1. 주문번호 생성
+    String uniqueOrderId =
+        "${profileKey}_${DateTime.now().millisecondsSinceEpoch}";
+    // 1. ★ 여기서 통화와 금액을 동적으로 결정합니다.
+    String selectedCurrency;
+    int amount;
+
+    // (예시) 언어가 한국어면 KRW, 아니면 USD
+    if (_targetLanguage == 'ko') {
+      selectedCurrency = 'KRW';
+      amount = 1000; // 1,000원
+    } else {
+      selectedCurrency = 'USD';
+      amount = 1; // 1달러 (토스 테스트 최소금액 확인 필요, 보통 1달러 이상)
+    }
+
+    // 2. 결제 화면으로 이동 (결과를 기다림 await)
+    // payment_screen.dart가 import 되어 있어야 합니다.
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => PaymentScreen(
+          orderId: uniqueOrderId,
+          orderName: '사주운세 정밀 분석',
+          amount: amount,
+          currency: selectedCurrency, // ★ 결정된 통화 전달
+        ),
       ),
     );
 
-    // 사용자가 [무료로 진행]을 눌렀다면?
-    if (isConfirmed == true) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("테스트 결제 승인! 분석을 시작합니다.")),
-        );
+    // 3. 결제 결과 처리
+    if (result != null && result['success'] == true) {
+      // ✅ [성공] 서버로 '결제 승인(Confirm)' 요청
+      // 토스는 클라이언트 성공 후, 서버에서 Confirm API를 호출해야 최종 완료됩니다.
+      bool serverSaved = await _verifyPaymentWithServer(
+        result['paymentKey'], // 토스 결제 키
+        result['orderId'], // 주문번호
+        result['amount'], // 금액
+        result['currency'], // 통화
+      );
+
+      if (serverSaved) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("결제가 완료되었습니다! 분석을 시작합니다.")),
+          );
+        }
+
+        // 1. 앱 내부에 '결제 완료' 기록 저장 (다음에 또 결제 안 하도록)
+        await PurchaseService().savePurchase(profileKey, null);
+
+        // 2. 실제 사주 분석 데이터 요청 (API 호출)
+        _fetchSajuData(profileKey);
+      } else {
+        _showError("결제 승인(서버) 중 오류가 발생했습니다. 고객센터에 문의해주세요.");
       }
-
-      // 1. '돈 냈음(구매 함)'으로 처리하고 저장
-      await PurchaseService().savePurchase(profileKey, null);
-
-      // 2. 서버에서 데이터 받아오기
-      _fetchSajuData(profileKey);
+    } else {
+      // ❌ [실패/취소]
+      if (mounted && result != null && result['message'] != null) {
+        _showError("결제 실패: ${result['message']}");
+      }
     }
   }
 
-  // [신규 추가] 모의 결제 다이얼로그
+  // [서버 통신] C# 서버에 토스 결제 승인 요청
+  Future<bool> _verifyPaymentWithServer(
+      String paymentKey, String orderId, num amount, String currency) async {
+    try {
+      final bodyData = {
+        "paymentKey": paymentKey,
+        "orderId": orderId,
+        "amount": amount,
+        "currency": currency,
+      };
+
+      // ★ 서버 주소: PaymentController의 ConfirmPayment 함수 주소
+      String paymentUrl = baseUrl.replaceAll("/Orders", "/Payment");
+      final response = await http.post(
+        Uri.parse("$paymentUrl/complete"),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode(bodyData),
+      );
+
+      if (response.statusCode == 200) {
+        // 서버 응답이 OK(200)이면 성공
+        return true;
+      } else {
+        print("서버 승인 실패: ${response.body}");
+        return false;
+      }
+    } catch (e) {
+      print("서버 통신 오류: $e");
+      return false;
+    }
+  }
+}
+
+
+
+
+
+
+/*
+  // [수정] home_screen.dart 내부 함수
+  void _showPaymentScreen(String profileKey) async {
+    // 1. 주문번호 생성
+    String uniqueOrderId =
+        "${profileKey}_${DateTime.now().millisecondsSinceEpoch}";
+
+    // 2. 포트원 설정 (본인 키값)
+    const String myStoreId = 'store-30115854-4d7d-4bdd-83de-b2ceb3090be5';
+    const String channelKeyKr =
+        'channel-key-ba8bc560-5447-437f-86ca-b1fbde9628f9';
+    const String channelKeyGlobal =
+        'channel-key-c3173350-8de0-4e51-80b3-8b16fcc0edf4';
+
+    // 3. 언어별 채널 및 통화 설정
+    String selectedChannelKey;
+    PaymentCurrency currency;
+    int amount;
+
+    if (_targetLanguage == 'ko') {
+      selectedChannelKey = channelKeyKr;
+      currency = PaymentCurrency.KRW;
+      amount = 1000;
+    } else {
+      selectedChannelKey = channelKeyGlobal;
+      currency = PaymentCurrency.USD;
+      amount = 15;
+    }
+
+    // 4. ★ PaymentScreen으로 이동 (결과를 기다림 await)
+    // 여기서 Navigator.push를 통해 화면을 전환합니다.
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => PaymentScreen(
+            storeId: myStoreId,
+            channelKey: selectedChannelKey,
+            paymentId: uniqueOrderId,
+            orderName: '사주 정밀 분석',
+            amount: amount,
+            currency: currency),
+      ),
+    );
+
+    // 5. ★ 돌아온 결과 처리 (서버 검증 및 저장)
+    if (result != null && result['success'] == true) {
+      // ✅ 결제 성공! 서버로 검증 요청
+      bool serverSaved = await _verifyPaymentWithServer(
+        uniqueOrderId, // merchant_uid
+        result['paymentId'], // imp_uid (포트원 거래번호)
+        amount,
+      );
+
+      if (serverSaved) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("결제 성공! ($amount $currency)")),
+          );
+        }
+        // 앱 내부 '돈 냈음' 처리
+        await PurchaseService().savePurchase(profileKey, null);
+        _fetchSajuData(profileKey); // 분석 시작
+      } else {
+        _showError("결제는 성공했으나 서버 저장에 실패했습니다.");
+      }
+    } else if (result != null) {
+      // ❌ 결제 취소 또는 실패
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text("결제가 취소되었거나 실패했습니다."),
+              backgroundColor: Colors.redAccent),
+        );
+      }
+    }
+*/
+    /*   기존 소스
+    // 2. 결제 화면으로 이동 (결과를 기다림 await)
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => PaymentScreen(
+          orderId: uniqueOrderId,
+          amount: 1000, // ★ 테스트 결제 금액 (1000원)
+          name: '2026년 사주 정밀 분석',
+        ),
+      ),
+    );
+
+    // 3. 결제 결과 처리
+    if (result != null && result['success'] == true) {
+      // ✅ 결제 성공!
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("결제가 완료되었습니다! 분석을 시작합니다.")),
+        );
+      }
+
+      // 1. '돈 냈음' 처리 (여기서 profileKey 원본을 사용)
+      await PurchaseService().savePurchase(profileKey, null);
+
+      // 2. 서버 데이터 요청
+      _fetchSajuData(profileKey);
+    } else if (result != null) {
+      // ❌ 결제 실패 또는 취소
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("결제 실패: ${result['error_msg'] ?? '취소됨'}")),
+        );
+      }
+    }
+    */
+
+  /*
   void _showPaymentDialog(String profileKey) {
     showDialog(
       context: context,
@@ -1659,45 +1905,8 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               onPressed: () async {
                 Navigator.pop(context); // 다이얼로그 닫기
-
-                // 1. 결제 화면으로 이동
-                /*
-                final result = await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => PaymentScreen(
-                      orderId:
-                          profileKey, // 주문번호로 profileKey 사용 (또는 timestamp 조합)
-                      amount: 1000, // 테스트 금액 1000원
-                      name: '사주 정밀 분석',
-                    ),
-                  ),
-                );
-                */
-
-                /*
-                // 2. 결제 화면에서 돌아왔을 때 결과 처리
-                if (result != null && result['success'] == true) {
-                  // 3. (중요) 서버로 검증 요청 보내기
-                  // final verifyResp = await http.post(Uri.parse('$baseUrl/payment/complete'), ... );
-                  // if (verifyResp.statusCode == 200) { ... }
-
-                  // 검증 성공 시:
-                  //     await PurchaseService()
-                  //         .savePurchase(profileKey, null); // 로컬 저장
-                  _fetchSajuData(); // 데이터 불러오기
-
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("결제가 완료되었습니다!")),
-                  );
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                        content:
-                            Text("결제 실패: ${result?['error_msg'] ?? '취소됨'}")),
-                  );
-                }
-                */
+                // 테스트 결제 로직 연결
+                _showPaymentScreen(profileKey);
               },
               child: const Text("결제하기 (무료)",
                   style: TextStyle(color: Colors.white)),
@@ -1707,4 +1916,6 @@ class _HomeScreenState extends State<HomeScreen> {
       },
     );
   }
-}
+  */
+
+

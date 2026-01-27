@@ -87,7 +87,7 @@ class FiveElementsDiagram extends StatelessWidget {
                   _buildLegendItem(
                       AppLocale.get(targetLanguage, 'diagram_saeng'),
                       Colors.blue),
-                  const SizedBox(width: 20),
+                  const SizedBox(width: 25),
                   _buildLegendItem(
                       AppLocale.get(targetLanguage, 'diagram_geuk'),
                       Colors.redAccent),
@@ -99,7 +99,7 @@ class FiveElementsDiagram extends StatelessWidget {
 
           // 다이어그램 영역 (높이 확보)
           SizedBox(
-            height: 400, // ★ 380 -> 400 (원이 커졌으니 공간 더 확보)
+            height: 470, // ★ 380 -> 400 (원이 커졌으니 공간 더 확보)
             width: double.infinity,
             child: CustomPaint(
               painter: _PentagonPainter(displayElements),
@@ -113,12 +113,12 @@ class FiveElementsDiagram extends StatelessWidget {
   Widget _buildLegendItem(String label, Color color) {
     return Row(
       children: [
-        Icon(Icons.arrow_right_alt, color: color, size: 24), // 아이콘 20->24
-        const SizedBox(width: 4),
+        Icon(Icons.arrow_right_alt, color: color, size: 27), // 아이콘
+        const SizedBox(width: 7),
         Text(
           label,
           style: const TextStyle(
-              fontSize: 13, fontWeight: FontWeight.bold, color: Colors.grey),
+              fontSize: 16, fontWeight: FontWeight.bold, color: Colors.grey),
         ),
       ],
     );
@@ -160,12 +160,12 @@ class _PentagonPainter extends CustomPainter {
     // ★ 선 두께 강화 (잘 보이게)
     final paintLineSaeng = Paint()
       ..color = Colors.blue.withOpacity(0.8)
-      ..strokeWidth = 3.5
+      ..strokeWidth = 3.6
       ..style = PaintingStyle.stroke;
 
     final paintLineGeuk = Paint()
       ..color = Colors.redAccent.withOpacity(0.4)
-      ..strokeWidth = 3
+      ..strokeWidth = 3.6
       ..style = PaintingStyle.stroke;
 
     List<Offset> points = [];
@@ -247,13 +247,13 @@ class _PentagonPainter extends CustomPainter {
 
     Paint borderPaint = Paint()
       ..color = color
-      ..strokeWidth = isMe ? 5 : 3 // 테두리 두께 4/2 -> 5/3
+      ..strokeWidth = isMe ? 7 : 5 // 테두리 두께 4/2 -> 5/3
       ..style = PaintingStyle.stroke;
 
     // 그림자
     canvas.drawCircle(
         center,
-        45, // ★ 반지름
+        49, // ★ 반지름
         Paint()
           ..color = Colors.grey.withOpacity(0.2)
           ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5));
@@ -265,7 +265,7 @@ class _PentagonPainter extends CustomPainter {
     TextSpan spanName = TextSpan(
       style: TextStyle(
           color: color,
-          fontSize: name.length > 3 ? 16 : 18, // ★ 폰트 크기 11/14 -> 14/18
+          fontSize: name.length > 3 ? 18 : 20, // ★ 폰트 크기 11/14 -> 14/18
           fontWeight: FontWeight.w900), // w900 (ExtraBold)
       text: name,
     );
@@ -280,7 +280,7 @@ class _PentagonPainter extends CustomPainter {
     TextSpan spanValue = TextSpan(
       style: TextStyle(
         color: Colors.grey[600],
-        fontSize: 15, // ★ 폰트 크기
+        fontSize: 17, // ★ 폰트 크기
         fontWeight: FontWeight.bold,
       ),
       text: valueText,
