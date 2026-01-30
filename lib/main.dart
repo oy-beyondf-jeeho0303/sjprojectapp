@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'home_screen.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'screens/intro_screen.dart'; // ★ import 추가
 
 // 보안 인증서 무시
 class MyHttpOverrides extends HttpOverrides {
@@ -46,7 +47,8 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2D3436)),
         scaffoldBackgroundColor: const Color(0xFFF5F7FA),
       ),
-      home: const HomeScreen(),
+
+      home: const IntroScreen(),
     );
   }
 }
