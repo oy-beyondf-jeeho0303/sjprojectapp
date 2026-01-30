@@ -33,7 +33,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   //final String baseUrl = "https://10.0.2.2:7033/api/Orders";  // PC 에뮬레이터 테스트 시
   final String baseUrl =
-      "http://192.168.219.105:5110/api/Orders"; // 실제 서버 운영 시 수정 필
+      "http://192.168.219.124:5110/api/Orders"; // 실제 서버 운영 시 수정 필
 
   // ★ [수정] 캡처 컨트롤러를 여기(변수 선언부)로 옮겨서 에러를 방지했습니다.
   final ScreenshotController _screenshotController = ScreenshotController();
