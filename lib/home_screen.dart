@@ -32,8 +32,8 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   //final String baseUrl = "https://10.0.2.2:7033/api/Orders";  // PC 에뮬레이터 테스트 시
-  final String baseUrl =
-      "http://192.168.219.124:5110/api/Orders"; // 실제 서버 운영 시 수정 필
+  //final String baseUrl = "http://192.168.219.124:5110/api/Orders"; // 실제 서버 운영 시 수정 필
+  final String baseUrl = "https://joepro-sajuapp-api-linux-bmfvc6dzd0esayhg.koreacentral-01.azurewebsites.net/api/Orders"; // Azure 서버 운영
 
   // ★ [수정] 캡처 컨트롤러를 여기(변수 선언부)로 옮겨서 에러를 방지했습니다.
   final ScreenshotController _screenshotController = ScreenshotController();
@@ -50,6 +50,7 @@ class _HomeScreenState extends State<HomeScreen> {
   City _selectedCity = globalCities[0];
 
   bool _isLoading = false;
+  bool _isPaymentProcessing = false;
   Map<String, dynamic>? _sajuDetail;
   String? _fortuneReport;
 
@@ -574,7 +575,7 @@ class _HomeScreenState extends State<HomeScreen> {
             width: double.infinity,
             height: 54,
             child: ElevatedButton(
-              onPressed: _isLoading ? null : _onAnalyzePressed,
+              onPressed: (_isLoading || _isPaymentProcessing) ? null : _onAnalyzePressed,
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF2D3436),
                 foregroundColor: Colors.white,
@@ -583,7 +584,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   borderRadius: BorderRadius.circular(16),
                 ),
               ),
-              child: _isLoading
+              child: (_isLoading || _isPaymentProcessing)
                   ? const SizedBox(
                       width: 24,
                       height: 24,
@@ -593,7 +594,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   : Text(
                       AppLocale.get(
                           _targetLanguage, 'btn_analyze'), // "운세 분석 시작"
-                      style: const TextStyle(
+                        style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),
@@ -1531,7 +1532,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
           // 2. HTML 내용 (왼쪽 정렬 적용)
           HtmlWidget(
-            _fortuneReport ?? "",
+            _fortuneReport?.replaceAll("```", "") ?? "", // 코드 블록 마커 제거
             textStyle: const TextStyle(
               fontSize: 15,
               height: 1.8, // 줄 간격 시원하게
@@ -1624,63 +1625,112 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ============================================================
-  // [결제 체크 및 분석 시작 로직]
+  // [메인 로직] 운세 분석 시작 버튼 클릭 시
   // ============================================================
   void _onAnalyzePressed() async {
-    final purchaseService = PurchaseService();
-    String birthTimeStr =
-        "${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}";
+    // 1. 이미 분석 중이거나 결제 중이면 클릭 무시 (중복 방지)
+    if (_isLoading || _isPaymentProcessing) return;
 
-    String profileKey = purchaseService.generateProfileKey(
-      _selectedDate,
-      birthTimeStr,
-      _gender,
-      _isLunar,
-    );
+    try {
+      final purchaseService = PurchaseService();
+      
+      // 날짜/시간 포맷팅
+      String birthTimeStr =
+          "${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}";
 
-    bool isPurchased = await purchaseService.isPurchased(profileKey);
+      // 프로필 키 생성
+      String profileKey = purchaseService.generateProfileKey(
+        _selectedDate,
+        birthTimeStr,
+        _gender,
+        _isLunar,
+      );
 
-    if (isPurchased) {
-      // 결제 내역 있음 -> 캐시 확인
+      // 2. 먼저 결제 여부 확인
+      bool isPurchased = await purchaseService.isPurchased(profileKey);
+
+      if (isPurchased) {
+        // [CASE A] 이미 결제된 내역이 있음 -> 바로 분석 시작
+        await _startAnalysisProcess(profileKey, purchaseService);
+      } else {
+        // [CASE B] 결제 안 됨 -> 결제 진행
+        
+        // 버튼을 '결제 중' 로딩 상태로 변경
+        setState(() {
+          _isPaymentProcessing = true; 
+        });
+
+        // ★ 결제 화면으로 이동하고 결과가 나올 때까지 대기(await)
+        await _showPaymentScreen(profileKey);
+
+        // 결제 화면에서 돌아옴 (성공이든 취소든) -> 일단 결제 로딩 끔
+        setState(() {
+          _isPaymentProcessing = false;
+        });
+
+        // 3. 돌아왔으니 진짜 결제 성공했는지 재확인
+        bool isPaidNow = await purchaseService.isPurchased(profileKey);
+        
+        if (isPaidNow) {
+          // 결제 성공 확인됨 -> 분석 시작
+          await _startAnalysisProcess(profileKey, purchaseService);
+        } 
+        // 결제 실패/취소 시에는 아무것도 안 함 (버튼이 다시 활성화됨)
+      }
+
+    } catch (e) {
+      // 에러 발생 시 모든 상태 초기화
+      setState(() { 
+        _isLoading = false;
+        _isPaymentProcessing = false;
+      });
+      print("에러 발생: $e");
+      if (mounted) _showError("오류가 발생했습니다: $e");
+    }
+  }
+
+  // ============================================================
+  // [보조 로직] 실제 분석 데이터 처리 (캐시 확인 or 서버 호출)
+  // ============================================================
+  Future<void> _startAnalysisProcess(String profileKey, PurchaseService purchaseService) async {
+    setState(() {
+      _isLoading = true; // 이제부터는 '분석 중' 로딩 표시
+    });
+
+    try {
+      // 캐시 데이터 확인
       var savedData = await purchaseService.getSavedData(profileKey);
 
-      // 데이터가 있고 언어가 같으면 서버 호출 없이 캐시 사용
+      // 캐시가 있고 언어가 같으면 서버 호출 없이 바로 적용
       if (savedData != null && savedData['lang'] == _targetLanguage) {
         setState(() {
           _sajuDetail = savedData['sajuDetail'];
           _fortuneReport = savedData['fortuneReport'];
+          _isLoading = false; // 분석 완료
         });
         return;
       }
 
-      // 데이터가 없거나 갱신 필요하면 서버 호출
-      _fetchSajuData(profileKey);
-    } else {
-      // 결제 안 함 -> 결제 화면으로
-      _showPaymentScreen(profileKey);
+      // 캐시 없으면 서버 호출 (이 함수 내부에서 로딩 끄는 처리가 있다고 가정)
+      await _fetchSajuData(profileKey);
+      
+    } catch (e) {
+      setState(() { _isLoading = false; });
+      rethrow; // 상위 catch로 에러 전달
     }
   }
 
   // [토스페이먼츠] 결제 화면 호출
-  void _showPaymentScreen(String profileKey) async {
+  Future<void> _showPaymentScreen(String profileKey) async {
     // 1. 주문번호 생성
     String uniqueOrderId =
         "${profileKey}_${DateTime.now().millisecondsSinceEpoch}";
-    // 1. ★ 여기서 통화와 금액을 동적으로 결정합니다.
-    String selectedCurrency;
-    int amount;
 
-    // (예시) 언어가 한국어면 KRW, 아니면 USD
-    if (_targetLanguage == 'ko') {
-      selectedCurrency = 'KRW';
-      amount = 1000; // 1,000원
-    } else {
-      selectedCurrency = 'USD';
-      amount = 1; // 1달러 (토스 테스트 최소금액 확인 필요, 보통 1달러 이상)
-    }
+    // 2. 통화와 금액 결정
+    String selectedCurrency = _targetLanguage == 'ko' ? 'KRW' : 'USD';
+    int amount = _targetLanguage == 'ko' ? 9600 : 7;
 
-    // 2. 결제 화면으로 이동 (결과를 기다림 await)
-    // payment_screen.dart가 import 되어 있어야 합니다.
+    // 3. 결제 화면으로 이동 및 대기 (await)
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
@@ -1688,39 +1738,37 @@ class _HomeScreenState extends State<HomeScreen> {
           orderId: uniqueOrderId,
           orderName: '사주운세 정밀 분석',
           amount: amount,
-          currency: selectedCurrency, // ★ 결정된 통화 전달
+          currency: selectedCurrency,
         ),
       ),
     );
 
-    // 3. 결제 결과 처리
+    // 4. 결제 결과 처리 (화면에서 돌아온 후)
     if (result != null && result['success'] == true) {
-      // ✅ [성공] 서버로 '결제 승인(Confirm)' 요청
-      // 토스는 클라이언트 성공 후, 서버에서 Confirm API를 호출해야 최종 완료됩니다.
+      // ✅ [1차 성공] 클라이언트 승인 완료 -> 서버 검증 시작
       bool serverSaved = await _verifyPaymentWithServer(
-        result['paymentKey'], // 토스 결제 키
-        result['orderId'], // 주문번호
-        result['amount'], // 금액
-        result['currency'], // 통화
+        result['paymentKey'],
+        result['orderId'],
+        result['amount'],
+        result['currency'],
       );
 
       if (serverSaved) {
+        // ✅ [최종 성공]
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text("결제가 완료되었습니다! 분석을 시작합니다.")),
           );
         }
-
-        // 1. 앱 내부에 '결제 완료' 기록 저장 (다음에 또 결제 안 하도록)
+        // 앱 내부에 '결제 완료' 영구 기록
         await PurchaseService().savePurchase(profileKey, null);
-
-        // 2. 실제 사주 분석 데이터 요청 (API 호출)
-        _fetchSajuData(profileKey);
+        
+        // (여기서는 _fetchSajuData를 직접 부르지 않고 리턴하여 _onAnalyzePressed가 흐름을 이어받게 함)
       } else {
-        _showError("결제 승인(서버) 중 오류가 발생했습니다. 고객센터에 문의해주세요.");
+        if (mounted) _showError("결제 승인(서버) 중 오류가 발생했습니다.");
       }
     } else {
-      // ❌ [실패/취소]
+      // ❌ [취소/실패]
       if (mounted && result != null && result['message'] != null) {
         _showError("결제 실패: ${result['message']}");
       }

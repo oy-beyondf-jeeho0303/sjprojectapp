@@ -19,17 +19,17 @@ class _IntroScreenState extends State<IntroScreen> {
   final Map<String, List<Map<String, dynamic>>> _introDataMap = {
     'ko': [
       {
-        "title": "나만 뒤쳐진 것 같아? \n 남들은 다 잘나가는 것 같은데",
+        "title": "나만 뒤쳐진 건 아닐까? \n 남들은 다 잘나가는 것 같은데\n어찌해야 하지?",
         "desc": "당신이 태어난 날과 시간 속에 숨겨진\n고유한 기질과 잠재력을 통해 \n진정한 나만의 힘과 강점을 찾아보세요.",
         "icon": Icons.compass_calibration_outlined,
       },
       {
-        "title": "엔지니어 출신의 20년 경력 \n운세 전문가가 직접 개발한 분석",
+        "title": "엔지니어 출신의 20년 경력 \n사주 운세 전문가가 직접 개발하고\n참여한 믿을 수 있는 사주 분석",
         "desc": "수천년 동양 철학 데이터를\n최첨단 AI와 20년 전문가가 \n정밀하게 분석합니다.",
         "icon": Icons.psychology_alt,
       },
       {
-        "title": "완벽한 미래 \n올라갈 수 있는 힘",
+        "title": "미래를 준비하여 \n올라갈 수 있는 힘을 얻자",
         "desc": "재물운, 연애운, 그리고 대운의 흐름 \n올해의 운세까지.\n다가올 미래를 미리 준비하세요.",
         "icon": Icons.auto_graph_outlined,
       },
