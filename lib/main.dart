@@ -5,6 +5,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'home_screen.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'screens/intro_screen.dart'; // ★ import 추가
+import 'services/notification_service.dart'; // import 추가
 
 // 보안 인증서 무시
 class MyHttpOverrides extends HttpOverrides {
@@ -20,6 +21,10 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('ko_KR', null);
   HttpOverrides.global = MyHttpOverrides();
+
+  // 👇 [추가] 알림 서비스 초기화
+  await NotificationService().init();
+
   runApp(const MyApp());
 }
 

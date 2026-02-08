@@ -22,6 +22,7 @@ import 'package:sj_project_app/utils/localization_data.dart';
 import 'city_data.dart';
 import 'five_elements.dart';
 import '../screens/payment_screen.dart';
+import '../screens/daily_fortune_card.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -32,7 +33,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   //final String baseUrl = "https://10.0.2.2:7033/api/Orders";  // PC 에뮬레이터 테스트 시
-  //final String baseUrl = "http://192.168.219.124:5110/api/Orders"; // 실제 서버 운영 시 수정 필
+  //final String baseUrl = "http://192.168.219.149:5110/api/Orders"; // 실제 서버 운영 시 수정 필
   final String baseUrl = "https://joepro-sajuapp-api-linux-bmfvc6dzd0esayhg.koreacentral-01.azurewebsites.net/api/Orders"; // Azure 서버 운영
 
   // ★ [수정] 캡처 컨트롤러를 여기(변수 선언부)로 옮겨서 에러를 방지했습니다.
@@ -384,6 +385,13 @@ class _HomeScreenState extends State<HomeScreen> {
                       elementRun: _sajuDetail!['elementRun'],
                       dayMasterElement: _sajuDetail!['dayMasterElement'],
                       targetLanguage: _targetLanguage,
+                    ),
+                    // ----------------------------------------------------
+                    // ⭐ [여기 추가] 오행 분석과 상세 리포트 사이!
+                    // ----------------------------------------------------
+                    DailyFortuneCard(
+                      orderId: _sajuDetail?['orderId'] ?? _sajuDetail?['OrderId'] ?? "",
+                      serverUrl: "https://joepro-sajuapp-api-linux-bmfvc6dzd0esayhg.koreacentral-01.azurewebsites.net", // 션 님의 서버 주소
                     ),
                     const SizedBox(height: 30),
                     _buildHeader('header_report'), // "리포트"
@@ -1722,57 +1730,76 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // [토스페이먼츠] 결제 화면 호출
   Future<void> _showPaymentScreen(String profileKey) async {
-    // 1. 주문번호 생성
-    String uniqueOrderId =
-        "${profileKey}_${DateTime.now().millisecondsSinceEpoch}";
+        // 1. [추가] 주문 번호 생성 (이게 없어서 에러가 났습니다!)
+    String newOrderId = "ORDER_${DateTime.now().millisecondsSinceEpoch}";
 
     // 2. 통화와 금액 결정
     String selectedCurrency = _targetLanguage == 'ko' ? 'KRW' : 'USD';
     int amount = _targetLanguage == 'ko' ? 9600 : 7;
 
-    // 3. 결제 화면으로 이동 및 대기 (await)
+
+    // [기존 코드] 결제 화면으로 이동
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => PaymentScreen(
-          orderId: uniqueOrderId,
-          orderName: '사주운세 정밀 분석',
-          amount: amount,
-          currency: selectedCurrency,
+          orderId: newOrderId,
+          orderName: '사주 운세 분석', // 1회성 상품 이름
+          amount: 9600, // 1회성 가격
+          currency: "KRW",
+          isBilling: false, // ★ HomeScreen은 무조건 일반 결제입니다!
         ),
       ),
     );
+    
+      print("👀 결제 화면에서 돌아옴. 결과값: $result");
+   // String paymentKey = result['paymentKey'] ?? result['authKey'] ?? "";
+  //  String orderId = result['orderId'] ?? "";
 
-    // 4. 결제 결과 처리 (화면에서 돌아온 후)
     if (result != null && result['success'] == true) {
-      // ✅ [1차 성공] 클라이언트 승인 완료 -> 서버 검증 시작
+      
+      // 1. 데이터 안전하게 꺼내기
+      String paymentKey = result['paymentKey'] ?? result['authKey'] ?? "";
+      String resOrderId = result['orderId'] ?? "";
+      num resAmount = result['amount'] ?? 0;
+      String resCurrency = result['currency'] ?? "KRW";
+
+      if (paymentKey.isEmpty) {
+        print("❌ 결제 키가 없습니다.");
+        return;
+      }
+
+      // 2. 서버 검증 요청 (HomeScreen은 무조건 _verifyPaymentWithServer 호출)
+      // ★ 주석을 풀고 변수에 결과를 담습니다!
       bool serverSaved = await _verifyPaymentWithServer(
-        result['paymentKey'],
-        result['orderId'],
-        result['amount'],
-        result['currency'],
+        paymentKey, 
+        resOrderId, 
+        resAmount, 
+        resCurrency
       );
 
+      // 3. 검증 결과에 따른 처리
       if (serverSaved) {
-        // ✅ [최종 성공]
+        if (mounted) {
+           ScaffoldMessenger.of(context).showSnackBar(
+             const SnackBar(content: Text("결제가 완료되었습니다! 분석을 시작합니다.")),
+           );
+
+           await _fetchSajuData(profileKey);        
+           // TODO: 분석 결과 화면으로 이동하는 코드 추가
+           // Navigator.pushReplacement(context, ...);
+
+        }
+      } else {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text("결제가 완료되었습니다! 분석을 시작합니다.")),
-          );
+             const SnackBar(content: Text("결제는 됐으나 서버 저장에 실패했습니다.")),
+           );
         }
-        // 앱 내부에 '결제 완료' 영구 기록
-        await PurchaseService().savePurchase(profileKey, null);
-        
-        // (여기서는 _fetchSajuData를 직접 부르지 않고 리턴하여 _onAnalyzePressed가 흐름을 이어받게 함)
-      } else {
-        if (mounted) _showError("결제 승인(서버) 중 오류가 발생했습니다.");
       }
     } else {
-      // ❌ [취소/실패]
-      if (mounted && result != null && result['message'] != null) {
-        _showError("결제 실패: ${result['message']}");
-      }
-    }
+       print("결제 취소 또는 실패");
+    }   
   }
 
   // [서버 통신] C# 서버에 토스 결제 승인 요청
@@ -1807,163 +1834,4 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 }
-
-
-
-
-
-
-/*
-  // [수정] home_screen.dart 내부 함수
-  void _showPaymentScreen(String profileKey) async {
-    // 1. 주문번호 생성
-    String uniqueOrderId =
-        "${profileKey}_${DateTime.now().millisecondsSinceEpoch}";
-
-    // 2. 포트원 설정 (본인 키값)
-    const String myStoreId = 'store-30115854-4d7d-4bdd-83de-b2ceb3090be5';
-    const String channelKeyKr =
-        'channel-key-ba8bc560-5447-437f-86ca-b1fbde9628f9';
-    const String channelKeyGlobal =
-        'channel-key-c3173350-8de0-4e51-80b3-8b16fcc0edf4';
-
-    // 3. 언어별 채널 및 통화 설정
-    String selectedChannelKey;
-    PaymentCurrency currency;
-    int amount;
-
-    if (_targetLanguage == 'ko') {
-      selectedChannelKey = channelKeyKr;
-      currency = PaymentCurrency.KRW;
-      amount = 1000;
-    } else {
-      selectedChannelKey = channelKeyGlobal;
-      currency = PaymentCurrency.USD;
-      amount = 15;
-    }
-
-    // 4. ★ PaymentScreen으로 이동 (결과를 기다림 await)
-    // 여기서 Navigator.push를 통해 화면을 전환합니다.
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => PaymentScreen(
-            storeId: myStoreId,
-            channelKey: selectedChannelKey,
-            paymentId: uniqueOrderId,
-            orderName: '사주 정밀 분석',
-            amount: amount,
-            currency: currency),
-      ),
-    );
-
-    // 5. ★ 돌아온 결과 처리 (서버 검증 및 저장)
-    if (result != null && result['success'] == true) {
-      // ✅ 결제 성공! 서버로 검증 요청
-      bool serverSaved = await _verifyPaymentWithServer(
-        uniqueOrderId, // merchant_uid
-        result['paymentId'], // imp_uid (포트원 거래번호)
-        amount,
-      );
-
-      if (serverSaved) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("결제 성공! ($amount $currency)")),
-          );
-        }
-        // 앱 내부 '돈 냈음' 처리
-        await PurchaseService().savePurchase(profileKey, null);
-        _fetchSajuData(profileKey); // 분석 시작
-      } else {
-        _showError("결제는 성공했으나 서버 저장에 실패했습니다.");
-      }
-    } else if (result != null) {
-      // ❌ 결제 취소 또는 실패
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text("결제가 취소되었거나 실패했습니다."),
-              backgroundColor: Colors.redAccent),
-        );
-      }
-    }
-*/
-    /*   기존 소스
-    // 2. 결제 화면으로 이동 (결과를 기다림 await)
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => PaymentScreen(
-          orderId: uniqueOrderId,
-          amount: 1000, // ★ 테스트 결제 금액 (1000원)
-          name: '2026년 사주 정밀 분석',
-        ),
-      ),
-    );
-
-    // 3. 결제 결과 처리
-    if (result != null && result['success'] == true) {
-      // ✅ 결제 성공!
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("결제가 완료되었습니다! 분석을 시작합니다.")),
-        );
-      }
-
-      // 1. '돈 냈음' 처리 (여기서 profileKey 원본을 사용)
-      await PurchaseService().savePurchase(profileKey, null);
-
-      // 2. 서버 데이터 요청
-      _fetchSajuData(profileKey);
-    } else if (result != null) {
-      // ❌ 결제 실패 또는 취소
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("결제 실패: ${result['error_msg'] ?? '취소됨'}")),
-        );
-      }
-    }
-    */
-
-  /*
-  void _showPaymentDialog(String profileKey) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) {
-        return AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text("결제 요청"),
-          content: const Text(
-            "상세 운세를 보려면 결제가 필요합니다.\n(현재 테스트 모드: 무료로 통과됩니다)",
-            style: TextStyle(height: 1.5),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text("취소", style: TextStyle(color: Colors.grey)),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF2D3436),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8)),
-              ),
-              onPressed: () async {
-                Navigator.pop(context); // 다이얼로그 닫기
-                // 테스트 결제 로직 연결
-                _showPaymentScreen(profileKey);
-              },
-              child: const Text("결제하기 (무료)",
-                  style: TextStyle(color: Colors.white)),
-            ),
-          ],
-        );
-      },
-    );
-  }
-  */
-
 

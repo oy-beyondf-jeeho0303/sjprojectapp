@@ -17,13 +17,16 @@ dependencies:
   shared_preferences: ^2.2.2
   flutter_widget_from_html: ^0.17.1
   fl_chart: ^1.1.1
-  intl: ^0.20.2
   screenshot: ^3.0.0      # 화면 캡처용
   share_plus: ^10.1.4     # 공유하기 기능
   path_provider: ^2.1.5   # 임시 파일 저장 경로 확보
+  flutter_launcher_icons: ^0.13.1
 
   flutter_localizations:
     sdk: flutter
+  intl: ^0.20.2
+  flutter_local_notifications: ^20.0.0
+  timezone: ^0.10.1
 
 dev_dependencies:
   flutter_test:
@@ -34,3 +37,13 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/intro_bg.jpg
+
+    # 👇 [추가] 파일 맨 아래에 이 내용을 붙여넣으세요
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/images/icon.png" # 준비한 이미지 경로
+  min_sdk_android: 21 # 안드로이드 최소 버전
+  # 👇 갤럭시 등 최신 폰에서 꽉 찬 아이콘(Adaptive Icon)을 위해 필요
+  adaptive_icon_background: "#FFFFFF" # 배경색 (흰색)
+  adaptive_icon_foreground: "assets/images/icon.png" # 아이콘 이미지

@@ -19,36 +19,44 @@ class City {
 
 // 2. 전세계 주요 도시 데이터
 final List<City> globalCities = [
-  City(name: "서울", country: "대한민국", lat: 37.5665, lng: 126.9780, timezone: 9.0),
-  City(name: "부산", country: "대한민국", lat: 35.1796, lng: 129.0756, timezone: 9.0),
-  City(name: "도쿄", country: "일본", lat: 35.6762, lng: 139.6503, timezone: 9.0),
-  City(name: "베이징", country: "중국", lat: 39.9042, lng: 116.4074, timezone: 8.0),
-  City(name: "뉴욕", country: "미국", lat: 40.7128, lng: -74.0060, timezone: -5.0),
-  City(name: "LA", country: "미국", lat: 34.0522, lng: -118.2437, timezone: -8.0),
-  City(name: "런던", country: "영국", lat: 51.5074, lng: -0.1278, timezone: 0.0),
-  City(name: "파리", country: "프랑스", lat: 48.8566, lng: 2.3522, timezone: 1.0),
-  City(
-    name: "시드니",
-    country: "호주",
-    lat: -33.8688,
-    lng: 151.2093,
-    timezone: 10.0,
-  ),
-  City(
-    name: "상파울루",
-    country: "브라질",
-    lat: -23.5505,
-    lng: -46.6333,
-    timezone: -3.0,
-  ),
-  City(name: "호치민", country: "베트남", lat: 10.8231, lng: 106.6297, timezone: 7.0),
+  City(name: "Seoul", country: "South Korea", lat: 37.5665, lng: 126.9780, timezone: 9.0),
+  City(name: "Busan", country: "South Korea", lat: 35.1796, lng: 129.0756, timezone: 9.0),
+  City(name: "Incheon", country: "South Korea", lat: 37.4563, lng: 126.7052, timezone: 9.0),
+  City(name: "Jeju", country: "South Korea", lat: 33.4996, lng: 126.5312, timezone: 9.0),
+
+// 🇯🇵 Japan
+  City(name: "Tokyo", country: "Japan", lat: 35.6762, lng: 139.6503, timezone: 9.0),
+  City(name: "Osaka", country: "Japan", lat: 34.6937, lng: 135.5023, timezone: 9.0),
+  City(name: "Fukuoka", country: "Japan", lat: 33.5904, lng: 130.4017, timezone: 9.0),
+  City(name: "Sapporo", country: "Japan", lat: 43.0618, lng: 141.3545, timezone: 9.0),
+
+  // 🇺🇸 USA (Timezone & Longitude diversity)
+  City(name: "New York", country: "USA", lat: 40.7128, lng: -74.0060, timezone: -5.0), // EST
+  City(name: "Chicago", country: "USA", lat: 41.8781, lng: -87.6298, timezone: -6.0), // CST
+  City(name: "Denver", country: "USA", lat: 39.7392, lng: -104.9903, timezone: -7.0), // MST
+  City(name: "Los Angeles", country: "USA", lat: 34.0522, lng: -118.2437, timezone: -8.0), // PST
+  City(name: "San Francisco", country: "USA", lat: 37.7749, lng: -122.4194, timezone: -8.0),
+  City(name: "Seattle", country: "USA", lat: 47.6062, lng: -122.3321, timezone: -8.0),
+  City(name: "Honolulu", country: "USA", lat: 21.3069, lng: -157.8583, timezone: -10.0), // HST
+
+  // 🇨🇳 China
+  City(name: "Beijing", country: "China", lat: 39.9042, lng: 116.4074, timezone: 8.0),
+  City(name: "Shanghai", country: "China", lat: 31.2304, lng: 121.4737, timezone: 8.0),
+
+  // 🇪🇺 Europe
+  City(name: "London", country: "UK", lat: 51.5074, lng: -0.1278, timezone: 0.0),
+  City(name: "Paris", country: "France", lat: 48.8566, lng: 2.3522, timezone: 1.0),
+  City(name: "Berlin", country: "Germany", lat: 52.5200, lng: 13.4050, timezone: 1.0),
+  
+  City(name: "Singapore", country: "Singapore", lat: 1.3521, lng: 103.8198, timezone: 8.0),
+  City(name: "Ho Chi Minh", country: "Vietnam", lat: 10.8231, lng: 106.6297, timezone: 7.0),
 ];
 
 // 3. ★★★ 도시 검색 기능 ★★★
 // <City?> 물음표가 있어야 '뒤로가기' 했을 때 null을 반환할 수 있습니다.
 class CitySearchDelegate extends SearchDelegate<City?> {
   @override
-  String get searchFieldLabel => "도시명 검색 (예: 서울, 뉴욕)";
+  String get searchFieldLabel => "Search for city (e.g., Seoul, LA, Tokyo)";
 
   @override
   List<Widget>? buildActions(BuildContext context) {
