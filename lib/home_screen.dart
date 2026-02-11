@@ -13,6 +13,7 @@ import 'package:share_plus/share_plus.dart'; // 공유 패키지
 import 'package:path_provider/path_provider.dart'; // 경로 패키지
 import 'package:tosspayments_widget_sdk_flutter/model/payment_widget_options.dart';
 import 'package:uuid/uuid.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // 프로젝트 내부 파일 import
 import 'package:sj_project_app/services/purchase_service.dart';
@@ -23,6 +24,9 @@ import 'city_data.dart';
 import 'five_elements.dart';
 import '../screens/payment_screen.dart';
 import '../screens/daily_fortune_card.dart';
+// ★ [추가] 월별 운세 위젯 import
+import '../screens/MonthlyFortuneDisplay.dart'; 
+
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -32,22 +36,22 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  // ... (기존 변수들은 그대로 유지)
   //final String baseUrl = "https://10.0.2.2:7033/api/Orders";  // PC 에뮬레이터 테스트 시
-  //final String baseUrl = "http://192.168.219.149:5110/api/Orders"; // 실제 서버 운영 시 수정 필
+  //final String baseUrl = "http://localhost:5110/api/Orders"; // 실제 서버 운영 시 수정 필
   final String baseUrl = "https://joepro-sajuapp-api-linux-bmfvc6dzd0esayhg.koreacentral-01.azurewebsites.net/api/Orders"; // Azure 서버 운영
 
-  // ★ [수정] 캡처 컨트롤러를 여기(변수 선언부)로 옮겨서 에러를 방지했습니다.
+  // ★ [추가] 월별 운세에 강제 주입할 핵심 데이터 변수
+  String _currentIlju = ""; 
+  String _currentYongsin = "";
+
   final ScreenshotController _screenshotController = ScreenshotController();
 
   DateTime _selectedDate = DateTime(1981, 3, 3);
   TimeOfDay _selectedTime = const TimeOfDay(hour: 13, minute: 30);
   String _gender = "M";
   bool _isLunar = false;
-
-  // 기본값은 한국어
   String _targetLanguage = "ko";
-
-  // 기본 도시
   City _selectedCity = globalCities[0];
 
   bool _isLoading = false;
@@ -55,17 +59,36 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? _sajuDetail;
   String? _fortuneReport;
 
+  // ★ [추가] 월별 운세 결제 여부 확인용 변수
+  bool _isMonthlyFortuneUnlocked = false;
+  // ★ [추가] 월별 운세 데이터 (나중에 서버에서 받아올 곳)
+  List<MonthlyFortuneModel> _monthlyFortuneData = [];
+
+
   @override
   void initState() {
     super.initState();
     _detectLanguage();
+    // ★ [추가] 테스트용 더미 데이터 생성 (나중엔 서버 데이터로 교체)
+    _generateDummyMonthlyData(); 
+  }
+  
+  // ★ [추가] 테스트용 월별 데이터 생성 함수
+  void _generateDummyMonthlyData() {
+      // 간지 리스트 (갑자, 을축...) - 로직으로 생성하거나 서버에서 받아옴
+      // 여기서는 UI 테스트를 위해 하드코딩된 예시를 넣습니다.
+      _monthlyFortuneData = List.generate(12, (index) {
+        return MonthlyFortuneModel(
+          month: index + 1,
+          gan: ['甲', '乙', '丙', '丁', '戊', '己', '庚', '辛', '壬', '癸'][index % 10],
+          ji: ['子', '丑', '寅', '卯', '辰', '巳', '午', '未', '申', '酉', '戌', '亥'][index % 12],
+          content: "${index + 1}월은 새로운 기운이 들어오는 시기입니다. \n특히 재물운이 상승하고 귀인을 만나게 될 것입니다. \n하지만 건강에는 조금 유의하는 것이 좋겠습니다.",
+        );
+      });
   }
 
   void _detectLanguage() {
-    // 1. 기기의 현재 시스템 언어 가져오기
-    final Locale systemLocale =
-        WidgetsBinding.instance.platformDispatcher.locale;
-
+    final Locale systemLocale = WidgetsBinding.instance.platformDispatcher.locale;
     setState(() {
       _targetLanguage = systemLocale.languageCode == 'ko'
           ? "ko"
@@ -73,14 +96,13 @@ class _HomeScreenState extends State<HomeScreen> {
               ? "ja"
               : "en";
     });
-
     print("시스템 언어 감지: ${systemLocale.languageCode} -> 앱 설정: $_targetLanguage");
   }
 
-  // ============================================================
-  // [기능 1] 서버 통신 및 데이터 저장
-  // ============================================================
-  Future<void> _fetchSajuData([String? profileKey]) async {
+  // ... (기존 _fetchSajuData, _shareResult, _showError, _openCitySearch, _saveCurrentProfile, _showLoadProfileDialog, _getHangul 함수들은 그대로 유지) ...
+  // (코드 길이상 생략합니다. 기존 코드를 그대로 두세요.)
+  
+   Future<void> _fetchSajuData([String? profileKey]) async {
     setState(() {
       _isLoading = true;
     });
@@ -113,21 +135,29 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(utf8.decode(response.bodyBytes));
-        data['lang'] = _targetLanguage; // 언어 정보 추가
+        data['lang'] = _targetLanguage; 
 
         setState(() {
           _sajuDetail = data['sajuDetail'];
           _fortuneReport = data['fortuneReport'];
+
+          // ★ 천간(gan)과 지지(ji)를 합쳐서 '일주'를 만듭니다 (예: 丙 + 子 = 丙子)
+          String gan = _sajuDetail?['day']?['gan']?['hanja'] ?? "";
+          String ji = _sajuDetail?['day']?['ji']?['hanja'] ?? "";
+          _currentIlju = "$gan$ji";
+          _currentYongsin = _sajuDetail?['yongsin'] ?? "";
+
+          // 새로운 사주 분석 시 월별 운세는 일단 잠금 (사용자가 바뀌었으므로)
+          _isMonthlyFortuneUnlocked = false;
+          _monthlyFortuneData = [];
         });
 
-        // ★ [핵심] 키가 없으면 생성 후 데이터 저장
         if (profileKey == null) {
           final purchaseService = PurchaseService();
           profileKey = purchaseService.generateProfileKey(
               _selectedDate, birthTime, _gender, _isLunar);
         }
 
-        // 내부 저장소에 데이터 캐싱
         await PurchaseService().savePurchase(profileKey, data);
       } else {
         if (mounted) {
@@ -143,11 +173,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // ============================================================
-  // [기능 2] 공유하기 (캡처 후 전송)
-  // ============================================================
   Future<void> _shareResult() async {
-    // 결과가 없으면 공유 불가
     if (_sajuDetail == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -160,19 +186,15 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _isLoading = true);
 
     try {
-      // 화면 캡처
       final Uint8List? image = await _screenshotController.capture();
 
       if (image != null) {
-        // 임시 저장소 경로 확보
         final directory = await getTemporaryDirectory();
         final imagePath =
             await File('${directory.path}/saju_result.png').create();
 
-        // 이미지 파일 저장
         await imagePath.writeAsBytes(image);
 
-        // 공유 팝업 실행
         await Share.shareXFiles(
           [XFile(imagePath.path)],
           text: '2026년 내 운세 분석 결과! (SJ Project)',
@@ -197,7 +219,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // 도시 검색
   void _openCitySearch() async {
     final City? result = await showSearch<City?>(
       context: context,
@@ -209,7 +230,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // [기능] 프로필 저장
   void _saveCurrentProfile() {
     final nameController = TextEditingController();
     showDialog(
@@ -239,8 +259,13 @@ class _HomeScreenState extends State<HomeScreen> {
               await ProfileService().addProfile(newProfile);
               if (mounted) {
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context)
-                    .showSnackBar(const SnackBar(content: Text("저장되었습니다!")));
+                
+                // ★ [핵심] 여기서 화면 전체를 setState 하지 않고 스낵바만 띄웁니다.
+                // 그래야 _isMonthlyFortuneUnlocked 상태가 유지됩니다.
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("프로필이 안전하게 저장되었습니다.")
+                  ),
+                );
               }
             },
             child: const Text("확인"),
@@ -250,7 +275,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // [기능] 프로필 불러오기
   void _showLoadProfileDialog() {
     showDialog(
       context: context,
@@ -274,56 +298,31 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _getHangul(String? hanja) {
     const Map<String, String> map = {
-      '甲': '갑',
-      '乙': '을',
-      '丙': '병',
-      '丁': '정',
-      '戊': '무',
-      '己': '기',
-      '庚': '경',
-      '辛': '신',
-      '壬': '임',
-      '癸': '계',
-      '子': '자',
-      '丑': '축',
-      '寅': '인',
-      '卯': '묘',
-      '辰': '진',
-      '巳': '사',
-      '午': '오',
-      '未': '미',
-      '申': '신',
-      '酉': '유',
-      '戌': '술',
-      '亥': '해',
+      '甲': '갑', '乙': '을', '丙': '병', '丁': '정', '戊': '무', '己': '기', '庚': '경', '辛': '신', '壬': '임', '癸': '계',
+      '子': '자', '丑': '축', '寅': '인', '卯': '묘', '辰': '진', '巳': '사', '午': '오', '未': '미', '申': '신', '酉': '유', '戌': '술', '亥': '해',
     };
     return map[hanja] ?? '';
   }
 
-  // ============================================================
-  // [메인 UI 빌드]
-  // ============================================================
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
       appBar: AppBar(
-        // 제목도 다국어로 나오게 설정
         title: Text(AppLocale.get(_targetLanguage, 'title'),
             style: const TextStyle(
                 fontWeight: FontWeight.bold, color: Colors.black)),
         backgroundColor: Colors.white,
         elevation: 0,
-        centerTitle: true, // 제목 가운데 정렬
+        centerTitle: true,
         actions: [
-          // ★ [언어 선택 팝업 버튼]
           PopupMenuButton<String>(
             icon: const Icon(Icons.language, color: Colors.black),
             onSelected: (String value) {
               setState(() {
-                _targetLanguage = value; // 선택한 언어로 변경
+                _targetLanguage = value;
               });
-              // (선택 사항) 언어 변경 시 안내 메시지
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                     content: Text("Language changed to $value"),
@@ -331,28 +330,18 @@ class _HomeScreenState extends State<HomeScreen> {
               );
             },
             itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
-              const PopupMenuItem<String>(
-                value: 'ko',
-                child: Text('🇰🇷 한국어'),
-              ),
-              const PopupMenuItem<String>(
-                value: 'en',
-                child: Text('🇺🇸 English'),
-              ),
-              const PopupMenuItem<String>(
-                value: 'ja',
-                child: Text('🇯🇵 日本語'),
-              ),
+              const PopupMenuItem<String>(value: 'ko', child: Text('🇰🇷 한국어')),
+              const PopupMenuItem<String>(value: 'en', child: Text('🇺🇸 English')),
+              const PopupMenuItem<String>(value: 'ja', child: Text('🇯🇵 日本語')),
             ],
           ),
           const SizedBox(width: 10),
         ],
       ),
-      // ★ Screenshot 위젯으로 전체 감싸기
       body: Screenshot(
         controller: _screenshotController,
         child: Container(
-          color: const Color(0xFFF5F6FA), // 배경색 지정 (캡처시 필수)
+          color: const Color(0xFFF5F6FA),
           child: SingleChildScrollView(
             child: Padding(
               padding: const EdgeInsets.all(20.0),
@@ -374,27 +363,34 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(height: 20),
                     _buildSeunList(),
                     const SizedBox(height: 30),
-                    _buildHeader('header_analysis'), // "오행 분석"
+                    _buildHeader('header_analysis'),
                     _buildAnalysisCard(),
                     const SizedBox(height: 30),
-                    _buildHeader('header_yongsin'), // "용신"
+                    _buildHeader('header_yongsin'),
                     _buildYongsinCard(),
                     const SizedBox(height: 30),
-                    _buildHeader('header_diagram'), // "관계도"
+                    _buildHeader('header_diagram'),
                     FiveElementsDiagram(
                       elementRun: _sajuDetail!['elementRun'],
                       dayMasterElement: _sajuDetail!['dayMasterElement'],
                       targetLanguage: _targetLanguage,
                     ),
-                    // ----------------------------------------------------
-                    // ⭐ [여기 추가] 오행 분석과 상세 리포트 사이!
-                    // ----------------------------------------------------
-                    DailyFortuneCard(
-                      orderId: _sajuDetail?['orderId'] ?? _sajuDetail?['OrderId'] ?? "",
-                      serverUrl: "https://joepro-sajuapp-api-linux-bmfvc6dzd0esayhg.koreacentral-01.azurewebsites.net", // 션 님의 서버 주소
-                    ),
+                //    const SizedBox(height: 30),
+                //    DailyFortuneCard(
+                //      orderId: _sajuDetail?['orderId'] ?? _sajuDetail?['OrderId'] ?? "",
+                //      serverUrl: "https://joepro-sajuapp-api-linux-bmfvc6dzd0esayhg.koreacentral-01.azurewebsites.net",
+                //    ),
+
                     const SizedBox(height: 30),
-                    _buildHeader('header_report'), // "리포트"
+                    
+                    // ★★★ [수정 포인트] 월별 운세 섹션 추가 ★★★
+                    // 기존 구독 배너 대신 월별 운세 위젯을 조건부 렌더링
+                    _isMonthlyFortuneUnlocked
+                        ? MonthlyFortuneDisplay(monthlyData: _monthlyFortuneData) // 결제 성공 시
+                        : _buildLockedMonthlyBanner(), // 결제 전 잠금 배너
+                    
+                    const SizedBox(height: 30),
+                    _buildHeader('header_report'),
                     _buildReportCard(),
                   ],
                 ],
@@ -405,6 +401,146 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+
+  // ★ [추가] 월별 운세 잠금 배너 위젯
+  Widget _buildLockedMonthlyBanner() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF1A237E), Color(0xFF283593)], // 네이비 그라데이션
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.indigo.withOpacity(0.4),
+            blurRadius: 10,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.lock_person_outlined, size: 40, color: Color(0xFFFFD700)), // 황금 자물쇠
+          const SizedBox(height: 16),
+          const Text(
+            "월별 상세 운세",
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            "올해 나의 달별 기운은 어떻게 흐를까요?\n지금 바로 상세한 월별 흐름을 확인해보세요.",
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white70, fontSize: 14),
+          ),
+          const SizedBox(height: 20),
+          
+          // 구매 버튼
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: ElevatedButton(
+              onPressed: _onPurchaseMonthlyFortune, // ★ 결제 함수 연결
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFFFD700), // 황금색 버튼
+                foregroundColor: Colors.black, 
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text(
+                "월별 상세 운세 확인하기 (₩5,900)", 
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ★ [추가] 월별 운세 결제 로직
+  // ★ [수정] 월별 운세 결제 및 데이터 가져오기 로직
+  void _onPurchaseMonthlyFortune() async {
+    final String orderId = "ORDER_MONTHLY_${DateTime.now().millisecondsSinceEpoch}";
+    
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => PaymentScreen(
+          orderId: orderId,
+          orderName: "월별 상세 운세", 
+          amount: 5900, 
+        ),
+      ),
+    );
+
+    if (result != null && result['success'] == true) {
+      setState(() => _isLoading = true);
+
+      try {
+        final response = await http.post(
+          Uri.parse("$baseUrl/MonthlyAnalysis"),
+          headers: {"Content-Type": "application/json"},
+          body: jsonEncode({
+            "paymentKey": result['paymentKey'],
+            "orderId": result['orderId'],
+            "amount": result['amount'],
+            "birthDate": DateFormat("yyyy-MM-dd").format(_selectedDate),
+            "birthTime": "${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}",
+            "gender": _gender,
+            "isLunar": _isLunar,
+            "targetLanguage": _targetLanguage,
+            "ilju": _currentIlju, 
+            "yongsin": _currentYongsin,
+          }),
+        );
+
+        if (response.statusCode == 200) {
+          final jsonResponse = jsonDecode(utf8.decode(response.bodyBytes));
+          
+          if (jsonResponse['success'] == true) {
+            final List<dynamic> list = jsonResponse['data'];
+
+            // ★★★ [캐시 저장 로직 추가] 프로필 고유 키 생성
+            final purchaseService = PurchaseService();
+            String birthTimeStr = "${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}";
+            String profileKey = purchaseService.generateProfileKey(_selectedDate, birthTimeStr, _gender, _isLunar);
+
+            // 기기 내부 저장소에 월별 데이터 영구 저장
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString('monthly_cache_$profileKey', jsonEncode(list));
+            // ★★★ 
+
+            setState(() {
+              _monthlyFortuneData = list.map((e) => MonthlyFortuneModel(
+                month: e['month'], gan: e['gan'], ji: e['ji'], content: e['content']
+              )).toList();
+              _isMonthlyFortuneUnlocked = true;
+            });
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text("월별 운세가 도착했습니다!")),
+            );
+          }
+        } else {
+          _showError("분석 실패: 서버 오류가 발생했습니다. (${response.statusCode})");
+        }
+      } catch (e) {
+        _showError("네트워크 오류가 발생했습니다.");
+      } finally {
+        setState(() => _isLoading = false);
+      }
+    } else if (result != null && result['success'] == false) {
+      _showError("결제 실패: ${result['message']}");
+    }
+  }
+  // ... (기존 _buildHeader, _buildInputCard, _buildTimePickerField, _buildGenderOption, _showCitySearchDialog 등 UI 헬퍼 함수들은 그대로 유지)
+  // (코드 길이상 생략합니다. 기존 코드를 그대로 두세요.)
+  // (맨 아래 _onAnalyzePressed, _startAnalysisProcess, _showPaymentScreen, _verifyPaymentWithServer 함수들도 그대로 유지)
 
   Widget _buildHeader(String key, {Map<String, String>? params}) {
     return Padding(
@@ -1702,29 +1838,53 @@ class _HomeScreenState extends State<HomeScreen> {
   // ============================================================
   Future<void> _startAnalysisProcess(String profileKey, PurchaseService purchaseService) async {
     setState(() {
-      _isLoading = true; // 이제부터는 '분석 중' 로딩 표시
+      _isLoading = true; 
     });
 
     try {
-      // 캐시 데이터 확인
       var savedData = await purchaseService.getSavedData(profileKey);
 
-      // 캐시가 있고 언어가 같으면 서버 호출 없이 바로 적용
       if (savedData != null && savedData['lang'] == _targetLanguage) {
+        
+        // ★★★ [캐시 불러오기 추가] 이전에 저장된 월별 운세가 있는지 확인
+        final prefs = await SharedPreferences.getInstance();
+        final String? monthlyCache = prefs.getString('monthly_cache_$profileKey');
+
+        List<MonthlyFortuneModel> loadedMonthlyData = [];
+        bool isMonthlyUnlocked = false;
+
+        if (monthlyCache != null) {
+          final List<dynamic> decodedList = jsonDecode(monthlyCache);
+          loadedMonthlyData = decodedList.map((e) => MonthlyFortuneModel(
+            month: e['month'], gan: e['gan'], ji: e['ji'], content: e['content']
+          )).toList();
+          isMonthlyUnlocked = true; // 저장된 기록이 있으면 자물쇠 해제!
+        }
+        // ★★★
+
         setState(() {
           _sajuDetail = savedData['sajuDetail'];
           _fortuneReport = savedData['fortuneReport'];
-          _isLoading = false; // 분석 완료
+          
+          String gan = _sajuDetail?['day']?['gan']?['hanja'] ?? "";
+          String ji = _sajuDetail?['day']?['ji']?['hanja'] ?? "";
+          _currentIlju = "$gan$ji";
+          _currentYongsin = _sajuDetail?['yongsin'] ?? "";
+
+          // 월별 운세 데이터 화면에 복구
+          _monthlyFortuneData = loadedMonthlyData;
+          _isMonthlyFortuneUnlocked = isMonthlyUnlocked;
+
+          _isLoading = false; 
         });
         return;
       }
 
-      // 캐시 없으면 서버 호출 (이 함수 내부에서 로딩 끄는 처리가 있다고 가정)
       await _fetchSajuData(profileKey);
       
     } catch (e) {
       setState(() { _isLoading = false; });
-      rethrow; // 상위 catch로 에러 전달
+      rethrow; 
     }
   }
 
@@ -1746,8 +1906,8 @@ class _HomeScreenState extends State<HomeScreen> {
           orderId: newOrderId,
           orderName: '사주 운세 분석', // 1회성 상품 이름
           amount: 9600, // 1회성 가격
-          currency: "KRW",
-          isBilling: false, // ★ HomeScreen은 무조건 일반 결제입니다!
+          // currency: "KRW",
+          //    isBilling: false, // ★ HomeScreen은 무조건 일반 결제입니다!
         ),
       ),
     );
@@ -1762,7 +1922,7 @@ class _HomeScreenState extends State<HomeScreen> {
       String paymentKey = result['paymentKey'] ?? result['authKey'] ?? "";
       String resOrderId = result['orderId'] ?? "";
       num resAmount = result['amount'] ?? 0;
-      String resCurrency = result['currency'] ?? "KRW";
+      String resCurrency = "KRW"; // result['currency'] ?? "KRW";
 
       if (paymentKey.isEmpty) {
         print("❌ 결제 키가 없습니다.");
@@ -1834,4 +1994,3 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 }
-

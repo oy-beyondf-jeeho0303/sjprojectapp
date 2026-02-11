@@ -221,18 +221,18 @@ class _DailyFortuneCardState extends State<DailyFortuneCard> {
           orderId: subOrderId,
           orderName: '월간 운세 구독 (매일 아침)',
           amount: 9600,
-          currency: 'KRW',
+        //  currency: 'KRW',
           
           // ⭐ [추가됨] 이 한 줄이 핵심입니다! 
-          // 결제 화면에게 "단건 결제가 아니라 카드 등록(빌링)을 해줘"라고 말하는 겁니다.
-          isBilling: true, 
+          // isSubscribed: true
+//
         ),
       ),
     );
 
     if (result != null && result['success'] == true) {
       String key = result['authKey'] ?? result['paymentKey'];
-      await _requestSubscriptionStart(key, "user@test.com", 3900);
+      await _requestSubscriptionStart(key, "user@test.com", 4900);
     }
   }
 
