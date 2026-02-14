@@ -2,6 +2,8 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:convert';
 import 'dart:ui' as ui; // 언어 감지용
+import 'dart:html' as html show window;
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -11,7 +13,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:screenshot/screenshot.dart'; // 캡처 패키지
 import 'package:share_plus/share_plus.dart'; // 공유 패키지
 import 'package:path_provider/path_provider.dart'; // 경로 패키지
-import 'package:tosspayments_widget_sdk_flutter/model/payment_widget_options.dart';
+//import 'package:tosspayments_widget_sdk_flutter/model/payment_widget_options.dart';
 import 'package:uuid/uuid.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -26,6 +28,7 @@ import '../screens/payment_screen.dart';
 import '../screens/daily_fortune_card.dart';
 // ★ [추가] 월별 운세 위젯 import
 import '../screens/MonthlyFortuneDisplay.dart'; 
+import '../screens/footer_widget.dart';
 
 
 class HomeScreen extends StatefulWidget {
@@ -70,7 +73,40 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _detectLanguage();
     // ★ [추가] 테스트용 더미 데이터 생성 (나중엔 서버 데이터로 교체)
-    _generateDummyMonthlyData(); 
+    _generateDummyMonthlyData();
+
+    // ★ [추가] 웹에서 결제 결과 확인
+    if (kIsWeb) {
+      _checkWebPaymentResult();
+      _restoreUserDataFromCache(); // ★ 사용자 데이터 복원
+    }
+  }
+
+  // ★ [추가] localStorage에서 사용자 입력 데이터 복원
+  void _restoreUserDataFromCache() async {
+    try {
+      final tempData = html.window.localStorage['temp_user_data'];
+      if (tempData != null) {
+        final data = jsonDecode(tempData);
+
+        setState(() {
+          _selectedDate = DateTime.parse(data['birthDate']);
+          _selectedTime = TimeOfDay(
+            hour: int.parse(data['birthTime'].split(':')[0]),
+            minute: int.parse(data['birthTime'].split(':')[1]),
+          );
+          _gender = data['gender'];
+          _isLunar = data['isLunar'];
+          _targetLanguage = data['targetLanguage'];
+          _currentIlju = data['ilju'] ?? '';
+          _currentYongsin = data['yongsin'] ?? '';
+        });
+
+        print('✅ 사용자 데이터 복원 완료: $_selectedDate, $_gender');
+      }
+    } catch (e) {
+      print('사용자 데이터 복원 실패: $e');
+    }
   }
   
   // ★ [추가] 테스트용 월별 데이터 생성 함수
@@ -85,6 +121,230 @@ class _HomeScreenState extends State<HomeScreen> {
           content: "${index + 1}월은 새로운 기운이 들어오는 시기입니다. \n특히 재물운이 상승하고 귀인을 만나게 될 것입니다. \n하지만 건강에는 조금 유의하는 것이 좋겠습니다.",
         );
       });
+  }
+
+  // ★ [추가] 웹 결제 결과 확인 함수 (쿼리 파라미터 + localStorage 체크)
+  void _checkWebPaymentResult() {
+    if (!kIsWeb) return;
+
+    try {
+      // ★★ [먼저] 사용자 데이터 복원 (동기적으로)
+      final tempData = html.window.localStorage['temp_user_data'];
+      if (tempData != null) {
+        final data = jsonDecode(tempData);
+        _selectedDate = DateTime.parse(data['birthDate']);
+        _selectedTime = TimeOfDay(
+          hour: int.parse(data['birthTime'].split(':')[0]),
+          minute: int.parse(data['birthTime'].split(':')[1]),
+        );
+        _gender = data['gender'];
+        _isLunar = data['isLunar'];
+        _targetLanguage = data['targetLanguage'];
+        _currentIlju = data['ilju'] ?? '';
+        _currentYongsin = data['yongsin'] ?? '';
+        print('✅ 결제 후 사용자 데이터 복원: $_selectedDate, $_gender, ilju=$_currentIlju');
+      }
+
+      // ★ 1단계: URL 쿼리 파라미터 체크 (Toss 리다이렉트)
+      final uri = Uri.parse(html.window.location.href);
+      final paymentParam = uri.queryParameters['payment'];
+
+      if (paymentParam == 'success') {
+        // 결제 성공 - URL에서 파라미터 추출
+        final paymentKey = uri.queryParameters['paymentKey'] ?? '';
+        final orderId = uri.queryParameters['orderId'] ?? '';
+        final amountStr = uri.queryParameters['amount'] ?? '0';
+
+        print('✅ 결제 성공! paymentKey=$paymentKey, orderId=$orderId');
+
+        // ★★ [핵심 수정] 즉시 로딩 상태로 전환하여 입력 폼 숨기기
+        setState(() {
+          _isLoading = true;
+        });
+
+        // URL 파라미터 제거 (깔끔하게)
+        html.window.history.pushState(null, '', uri.path);
+
+        if (paymentKey.isNotEmpty && orderId.isNotEmpty) {
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            // ★ [수정] 서버 검증
+            bool verified = await _verifyPaymentWithServer(
+              paymentKey,
+              orderId,
+              int.tryParse(amountStr) ?? 0,
+              'KRW'
+            );
+
+            if (verified && mounted) {
+              // ★★ [핵심] orderId 패턴으로 상세 운세 vs 월별 운세 구분
+              if (orderId.startsWith('ORDER_MONTHLY_')) {
+                // ========== 월별 운세 결제 완료 ==========
+                print('📅 월별 운세 결제 완료 감지');
+
+                try {
+                  final response = await http.post(
+                    Uri.parse("$baseUrl/MonthlyAnalysis"),
+                    headers: {"Content-Type": "application/json"},
+                    body: jsonEncode({
+                      "paymentKey": paymentKey,
+                      "orderId": orderId,
+                      "amount": int.tryParse(amountStr) ?? 0,
+                      "birthDate": DateFormat("yyyy-MM-dd").format(_selectedDate),
+                      "birthTime": "${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}",
+                      "gender": _gender,
+                      "isLunar": _isLunar,
+                      "targetLanguage": _targetLanguage,
+                      "ilju": _currentIlju,
+                      "yongsin": _currentYongsin,
+                    }),
+                  );
+
+                  if (response.statusCode == 200) {
+                    final jsonResponse = jsonDecode(utf8.decode(response.bodyBytes));
+
+                    if (jsonResponse['success'] == true) {
+                      final List<dynamic> list = jsonResponse['data'];
+
+                      // 프로필 키 생성
+                      final purchaseService = PurchaseService();
+                      String birthTimeStr = "${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}";
+                      String profileKey = purchaseService.generateProfileKey(
+                        _selectedDate,
+                        birthTimeStr,
+                        _gender,
+                        _isLunar,
+                      );
+
+                      // 캐시 저장
+                      final prefs = await SharedPreferences.getInstance();
+                      await prefs.setString('monthly_cache_$profileKey', jsonEncode(list));
+
+                      // ★★ [중요] 상태 업데이트
+                      setState(() {
+                        _monthlyFortuneData = list.map((e) => MonthlyFortuneModel(
+                          month: e['month'],
+                          gan: e['gan'],
+                          ji: e['ji'],
+                          content: e['content']
+                        )).toList();
+                        _isMonthlyFortuneUnlocked = true;
+                      });
+
+                      // ★★ [핵심] 상세 운세 분석 결과도 복원 (캐시에서 로드)
+                      // 참고: 월별 운세는 이미 상세 분석을 한 사람이 추가 구매하는 것이므로
+                      // 일반적으로 캐시에서 로드되지만, 만약을 위해 orderId는 전달하지 않음
+                      await _startAnalysisProcess(profileKey, purchaseService);
+
+                      // localStorage 정리
+                      html.window.localStorage.remove('temp_user_data');
+
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(AppLocale.get(_targetLanguage, 'msg_monthly_arrived'))),
+                      );
+                    }
+                  } else {
+                    _showError("${AppLocale.get(_targetLanguage, 'msg_monthly_fail')} (${response.statusCode})");
+                  }
+                } catch (e) {
+                  _showError("${AppLocale.get(_targetLanguage, 'msg_monthly_network_error')}: $e");
+                } finally {
+                  setState(() => _isLoading = false);
+                }
+
+              } else {
+                // ========== 상세 운세 분석 결제 완료 ==========
+                print('🔮 상세 운세 분석 결제 완료 감지');
+
+                final purchaseService = PurchaseService();
+                String birthTimeStr = "${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}";
+                String profileKey = purchaseService.generateProfileKey(
+                  _selectedDate,
+                  birthTimeStr,
+                  _gender,
+                  _isLunar,
+                );
+
+                // ★ 분석 프로세스 시작 (서버에서 데이터 가져와서 화면에 표시)
+                // ★★ [중요] orderId를 전달하여 서버에서 결제 검증하도록 함
+                await _startAnalysisProcess(profileKey, purchaseService, orderId);
+
+                // localStorage 정리
+                html.window.localStorage.remove('temp_user_data');
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(AppLocale.get(_targetLanguage, 'msg_payment_complete'))),
+                );
+              }
+
+            } else if (!verified && mounted) {
+              _showError(AppLocale.get(_targetLanguage, 'msg_payment_verify_fail'));
+            }
+          });
+        }
+        return;
+      } else if (paymentParam == 'fail') {
+        // 결제 실패
+        final errorCode = uri.queryParameters['code'] ?? 'UNKNOWN_ERROR';
+        final errorMessage = uri.queryParameters['message'] ?? '결제에 실패했습니다';
+
+        print('❌ 결제 실패! code=$errorCode, message=$errorMessage');
+
+        // URL 파라미터 제거
+        html.window.history.pushState(null, '', uri.path);
+
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _showError(errorMessage);
+          }
+        });
+        return;
+      }
+
+      // ★ 2단계: localStorage 체크 (payment_success_screen에서 저장한 경우)
+      final paymentResult = html.window.localStorage['payment_result'];
+
+      if (paymentResult == 'success') {
+        // 결제 성공 처리
+        final paymentKey = html.window.localStorage['payment_key'] ?? '';
+        final orderId = html.window.localStorage['order_id'] ?? '';
+        final amount = html.window.localStorage['amount'];
+
+        // localStorage 정리
+        html.window.localStorage.remove('payment_result');
+        html.window.localStorage.remove('payment_key');
+        html.window.localStorage.remove('order_id');
+        html.window.localStorage.remove('amount');
+
+        // 서버 검증 및 데이터 로드
+        if (paymentKey.isNotEmpty && orderId.isNotEmpty) {
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            await _verifyPaymentWithServer(
+              paymentKey,
+              orderId,
+              int.tryParse(amount ?? '0') ?? 0,
+              'KRW'
+            );
+          });
+        }
+      } else if (paymentResult == 'fail') {
+        // 결제 실패 처리
+        final errorMessage = html.window.localStorage['payment_error_message'] ?? '결제에 실패했습니다';
+
+        // localStorage 정리
+        html.window.localStorage.remove('payment_result');
+        html.window.localStorage.remove('payment_error_code');
+        html.window.localStorage.remove('payment_error_message');
+
+        // 에러 메시지 표시
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _showError(errorMessage);
+          }
+        });
+      }
+    } catch (e) {
+      print('결제 결과 확인 중 오류: $e');
+    }
   }
 
   void _detectLanguage() {
@@ -102,7 +362,7 @@ class _HomeScreenState extends State<HomeScreen> {
   // ... (기존 _fetchSajuData, _shareResult, _showError, _openCitySearch, _saveCurrentProfile, _showLoadProfileDialog, _getHangul 함수들은 그대로 유지) ...
   // (코드 길이상 생략합니다. 기존 코드를 그대로 두세요.)
   
-   Future<void> _fetchSajuData([String? profileKey]) async {
+   Future<void> _fetchSajuData([String? profileKey, String? orderId]) async {
     setState(() {
       _isLoading = true;
     });
@@ -114,6 +374,7 @@ class _HomeScreenState extends State<HomeScreen> {
           "${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}";
 
       final bodyData = {
+        "orderId": orderId, // ★ [추가] 결제 검증용 주문 번호
         "email": "user@test.com",
         "birthDate": birthDate,
         "birthTime": birthTime,
@@ -161,12 +422,12 @@ class _HomeScreenState extends State<HomeScreen> {
         await PurchaseService().savePurchase(profileKey, data);
       } else {
         if (mounted) {
-          _showError("서버 오류: ${response.statusCode}");
+          _showError("${AppLocale.get(_targetLanguage, 'msg_server_error')}: ${response.statusCode}");
         }
       }
     } catch (e) {
       if (mounted) {
-        _showError("서버 연결 실패: $e");
+        _showError("${AppLocale.get(_targetLanguage, 'msg_connect_fail')}: $e");
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -177,7 +438,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_sajuDetail == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("먼저 운세를 분석해주세요!")),
+          SnackBar(content: Text(AppLocale.get(_targetLanguage, 'msg_analyze_first'))),
         );
       }
       return;
@@ -204,7 +465,7 @@ class _HomeScreenState extends State<HomeScreen> {
       print("공유 실패: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("공유하기 실패: 권한을 확인해주세요.")),
+          SnackBar(content: Text(AppLocale.get(_targetLanguage, 'msg_share_fail'))),
         );
       }
     } finally {
@@ -310,8 +571,8 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
       appBar: AppBar(
-        title: Text(AppLocale.get(_targetLanguage, 'title'),
-            style: const TextStyle(
+        title: const Text('SJ Project',
+            style: TextStyle(
                 fontWeight: FontWeight.bold, color: Colors.black)),
         backgroundColor: Colors.white,
         elevation: 0,
@@ -392,7 +653,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(height: 30),
                     _buildHeader('header_report'),
                     _buildReportCard(),
+
+                    const SizedBox(height: 40),
                   ],
+
+                  SajuFooter(isSimple: _sajuDetail != null),
                 ],
               ),
             ),
@@ -466,14 +731,34 @@ class _HomeScreenState extends State<HomeScreen> {
   // ★ [수정] 월별 운세 결제 및 데이터 가져오기 로직
   void _onPurchaseMonthlyFortune() async {
     final String orderId = "ORDER_MONTHLY_${DateTime.now().millisecondsSinceEpoch}";
-    
+
+    // ★★ [핵심] 웹 결제는 페이지 리다이렉트로 모든 상태가 사라지므로,
+    // 사용자 데이터를 localStorage에 저장
+    if (kIsWeb) {
+      try {
+        final userData = {
+          'birthDate': _selectedDate.toIso8601String(),
+          'birthTime': "${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}",
+          'gender': _gender,
+          'isLunar': _isLunar,
+          'targetLanguage': _targetLanguage,
+          'ilju': _currentIlju,
+          'yongsin': _currentYongsin,
+        };
+        html.window.localStorage['temp_user_data'] = jsonEncode(userData);
+        print('💾 월별 운세 결제 전 사용자 데이터 저장: $userData');
+      } catch (e) {
+        print('❌ 사용자 데이터 저장 실패: $e');
+      }
+    }
+
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => PaymentScreen(
           orderId: orderId,
-          orderName: "월별 상세 운세", 
-          amount: 5900, 
+          orderName: "월별 상세 운세",
+          amount: 5900,
         ),
       ),
     );
@@ -1664,7 +1949,7 @@ class _HomeScreenState extends State<HomeScreen> {
               Text(
                 AppLocale.get(_targetLanguage, 'header_report'), // "상세 운세 리포트"
                 style: const TextStyle(
-                    fontSize: 18,
+                    fontSize: 19.5,
                     fontWeight: FontWeight.bold,
                     color: Color(0xFF2D3436)),
               ),
@@ -1678,8 +1963,8 @@ class _HomeScreenState extends State<HomeScreen> {
           HtmlWidget(
             _fortuneReport?.replaceAll("```", "") ?? "", // 코드 블록 마커 제거
             textStyle: const TextStyle(
-              fontSize: 15,
-              height: 1.8, // 줄 간격 시원하게
+              fontSize: 18, // ★ 모바일 가독성 향상 (17 -> 18.5)
+              height: 1.7, // 줄 간격 시원하게
               color: Color(0xFF424242),
               letterSpacing: -0.2,
             ),
@@ -1688,7 +1973,7 @@ class _HomeScreenState extends State<HomeScreen> {
               // 제목(h3) 스타일
               if (element.localName == 'h3') {
                 return {
-                  'font-size': '18px',
+                  'font-size': '19.5px',
                   'font-weight': 'bold',
                   'color': '#1565C0',
                   'margin-top': '24px',
@@ -1731,7 +2016,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Expanded(
                   child: Text(
                     "이 운세는 사주 명리학 이론을 바탕으로 분석한 결과입니다.",
-                    style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                    style: TextStyle(fontSize: 13.5, color: Colors.grey[500]),
                   ),
                 ),
               ],
@@ -1836,16 +2121,16 @@ class _HomeScreenState extends State<HomeScreen> {
   // ============================================================
   // [보조 로직] 실제 분석 데이터 처리 (캐시 확인 or 서버 호출)
   // ============================================================
-  Future<void> _startAnalysisProcess(String profileKey, PurchaseService purchaseService) async {
+  Future<void> _startAnalysisProcess(String profileKey, PurchaseService purchaseService, [String? orderId]) async {
     setState(() {
-      _isLoading = true; 
+      _isLoading = true;
     });
 
     try {
       var savedData = await purchaseService.getSavedData(profileKey);
 
       if (savedData != null && savedData['lang'] == _targetLanguage) {
-        
+
         // ★★★ [캐시 불러오기 추가] 이전에 저장된 월별 운세가 있는지 확인
         final prefs = await SharedPreferences.getInstance();
         final String? monthlyCache = prefs.getString('monthly_cache_$profileKey');
@@ -1865,7 +2150,7 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           _sajuDetail = savedData['sajuDetail'];
           _fortuneReport = savedData['fortuneReport'];
-          
+
           String gan = _sajuDetail?['day']?['gan']?['hanja'] ?? "";
           String ji = _sajuDetail?['day']?['ji']?['hanja'] ?? "";
           _currentIlju = "$gan$ji";
@@ -1875,22 +2160,42 @@ class _HomeScreenState extends State<HomeScreen> {
           _monthlyFortuneData = loadedMonthlyData;
           _isMonthlyFortuneUnlocked = isMonthlyUnlocked;
 
-          _isLoading = false; 
+          _isLoading = false;
         });
         return;
       }
 
-      await _fetchSajuData(profileKey);
-      
+      await _fetchSajuData(profileKey, orderId); // ★ [수정] orderId 전달
+
     } catch (e) {
       setState(() { _isLoading = false; });
-      rethrow; 
+      rethrow;
     }
   }
 
   // [토스페이먼츠] 결제 화면 호출
   Future<void> _showPaymentScreen(String profileKey) async {
-        // 1. [추가] 주문 번호 생성 (이게 없어서 에러가 났습니다!)
+    // ★★ [핵심 수정] 웹 결제는 페이지 리다이렉트로 모든 상태가 사라지므로,
+    // 사용자 데이터를 localStorage에 저장 (월별 운세와 동일하게)
+    if (kIsWeb) {
+      try {
+        final userData = {
+          'birthDate': _selectedDate.toIso8601String(),
+          'birthTime': "${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}",
+          'gender': _gender,
+          'isLunar': _isLunar,
+          'targetLanguage': _targetLanguage,
+          'ilju': _currentIlju,
+          'yongsin': _currentYongsin,
+        };
+        html.window.localStorage['temp_user_data'] = jsonEncode(userData);
+        print('💾 상세 운세 결제 전 사용자 데이터 저장: $userData');
+      } catch (e) {
+        print('❌ 사용자 데이터 저장 실패: $e');
+      }
+    }
+
+    // 1. [추가] 주문 번호 생성 (이게 없어서 에러가 났습니다!)
     String newOrderId = "ORDER_${DateTime.now().millisecondsSinceEpoch}";
 
     // 2. 통화와 금액 결정

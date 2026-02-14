@@ -93,7 +93,7 @@ class _MonthlyFortuneDisplayState extends State<MonthlyFortuneDisplay> {
           child: Text(
             _getMainTitleText(widget.targetLanguage, currentYear), // 다국어 적용
             style: const TextStyle(
-                fontSize: 20,
+                fontSize: 21.5,
                 fontWeight: FontWeight.w800,
                 color: Color(0xFF111111)),
           ),
@@ -164,7 +164,7 @@ class _MonthlyFortuneDisplayState extends State<MonthlyFortuneDisplay> {
                         child: Text(
                           _getMonthText(item.month, widget.targetLanguage), // ★ 다국어 월 함수 호출
                           style: const TextStyle(
-                            fontSize: 12,
+                            fontSize: 13.5,
                             fontWeight: FontWeight.bold,
                             color: Colors.black87,
                           ),
@@ -224,7 +224,7 @@ class _MonthlyFortuneDisplayState extends State<MonthlyFortuneDisplay> {
                   Text(
                     _getDetailTitleText(widget.targetLanguage), // ★ 다국어 상세 풀이 함수 호출
                     style: const TextStyle(
-                        fontSize: 17,
+                        fontSize: 18,
                         fontWeight: FontWeight.w800,
                         color: Colors.black87),
                   ),
@@ -234,8 +234,8 @@ class _MonthlyFortuneDisplayState extends State<MonthlyFortuneDisplay> {
               Text(
                 currentData.content,
                 style: const TextStyle(
-                  fontSize: 16,
-                  height: 1.65,
+                  fontSize: 18, // ★ 모바일 가독성 향상 (17 -> 18.5)
+                  height: 1.7,
                   color: Color(0xFF333333),
                   letterSpacing: -0.3,
                 ),
@@ -256,7 +256,7 @@ class _MonthlyFortuneDisplayState extends State<MonthlyFortuneDisplay> {
         Text(
           hanja,
           style: TextStyle(
-            fontSize: 22, 
+            fontSize: 23.5,
             fontWeight: FontWeight.bold,
             fontFamily: "Serif",
             color: _getFiveElementColor(hanja),
@@ -270,7 +270,7 @@ class _MonthlyFortuneDisplayState extends State<MonthlyFortuneDisplay> {
             child: Text(
               _getHangul(hanja),
               style: TextStyle(
-                fontSize: 11, 
+                fontSize: 12.5,
                 fontWeight: FontWeight.w600,
                 color: Colors.grey[500], 
                 height: 1.0,

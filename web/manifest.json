@@ -1,6 +1,6 @@
 {
-    "name": "sj_project_app",
-    "short_name": "sj_project_app",
+    "name": "SJ Project",
+    "short_name": "SJ Project",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

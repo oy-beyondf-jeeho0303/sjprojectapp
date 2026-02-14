@@ -1,6 +1,7 @@
-import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../home_screen.dart'; // 경로는 션 님의 프로젝트 구조에 맞게 확인해주세요.
+import 'footer_widget.dart';
 
 class IntroScreen extends StatefulWidget {
   const IntroScreen({super.key});
@@ -92,23 +93,22 @@ class _IntroScreenState extends State<IntroScreen> {
     'ja': '自分の運命を読み解く',
   };
 
-  // ★ [핵심] 앱이 켜질 때 폰의 언어를 감지하는 함수
+  // ★ [핵심] 앱이 켜질 때 시스템 언어를 감지하는 함수 (웹/앱 모두 호환)
   @override
   void initState() {
     super.initState();
     try {
-      // 폰의 시스템 언어 가져오기 (예: 'ko_KR', 'en_US', 'ja_JP')
-      String systemLang = Platform.localeName.split('_')[0]; 
-      
+      // ★ [수정] Platform.localeName은 웹에서 동작하지 않으므로
+      // Flutter의 platformDispatcher를 사용 (웹/앱 모두 호환)
+      final String systemLang = WidgetsBinding.instance.platformDispatcher.locale.languageCode;
+
       // 우리가 지원하는 언어(ko, en, ja)에 포함되면 그 언어로 설정
       if (_introDataMap.containsKey(systemLang)) {
         _currentLang = systemLang;
       } else {
-        // 지원하지 않는 언어(예: 프랑스어)면 기본값 영어(en)로 설정
         _currentLang = 'en';
       }
     } catch (e) {
-      // 혹시라도 에러 나면 영어로 안전하게
       _currentLang = 'en';
     }
   }
@@ -197,6 +197,13 @@ class _IntroScreenState extends State<IntroScreen> {
                             )
                           : const SizedBox(), 
                     ),
+                    Align(
+                        alignment: Alignment.bottomCenter,
+                        child: SajuFooter(
+                          isSimple: false, 
+                          isTransparent: true // ★ [핵심] 투명 배경 모드 켜기
+                        ), 
+                      ),
                   ],
                 ),
               ],

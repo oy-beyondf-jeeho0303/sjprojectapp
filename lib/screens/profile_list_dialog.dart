@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../services/profile_service.dart';
+import '../utils/localization_data.dart';
 
 class ProfileListDialog extends StatefulWidget {
   final Function(SajuProfile) onSelect; // 선택 시 실행할 함수
+  final String targetLanguage;
 
-  const ProfileListDialog({super.key, required this.onSelect});
+  const ProfileListDialog({
+    super.key,
+    required this.onSelect,
+    this.targetLanguage = 'ko',
+  });
 
   @override
   State<ProfileListDialog> createState() => _ProfileListDialogState();
@@ -33,13 +39,15 @@ class _ProfileListDialogState extends State<ProfileListDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final lang = widget.targetLanguage;
+
     return AlertDialog(
-      title: const Text("저장된 사주 목록"),
+      title: Text(AppLocale.get(lang, 'profile_list_title')),
       content: SizedBox(
         width: double.maxFinite,
         height: 300,
         child: _profiles.isEmpty
-            ? const Center(child: Text("저장된 목록이 없습니다."))
+            ? Center(child: Text(AppLocale.get(lang, 'profile_list_empty')))
             : ListView.builder(
                 itemCount: _profiles.length,
                 itemBuilder: (context, index) {
@@ -50,7 +58,10 @@ class _ProfileListDialogState extends State<ProfileListDialog> {
                     leading: CircleAvatar(
                       backgroundColor:
                           p.gender == "M" ? Colors.blue[100] : Colors.pink[100],
-                      child: Text(p.gender == "M" ? "남" : "여",
+                      child: Text(
+                          p.gender == "M"
+                              ? AppLocale.get(lang, 'gender_m_short')
+                              : AppLocale.get(lang, 'gender_f_short'),
                           style: TextStyle(
                               color:
                                   p.gender == "M" ? Colors.blue : Colors.pink,
@@ -59,7 +70,7 @@ class _ProfileListDialogState extends State<ProfileListDialog> {
                     title: Text(p.name,
                         style: const TextStyle(fontWeight: FontWeight.bold)),
                     subtitle: Text(
-                        "$birthStr ${p.birthTime} (${p.isLunar ? '음' : '양'})"),
+                        "$birthStr ${p.birthTime} (${p.isLunar ? AppLocale.get(lang, 'calendar_lunar') : AppLocale.get(lang, 'calendar_solar')})"),
                     onTap: () {
                       widget.onSelect(p); // 부모에게 선택된 사람 전달
                       Navigator.pop(context);
@@ -76,7 +87,7 @@ class _ProfileListDialogState extends State<ProfileListDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text("닫기"),
+          child: Text(AppLocale.get(lang, 'btn_close')),
         ),
       ],
     );

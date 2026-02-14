@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'utils/localization_data.dart';
 
 // 1. 도시 데이터 모델
 class City {

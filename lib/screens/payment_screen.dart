@@ -1,20 +1,20 @@
 import 'package:flutter/material.dart';
-import 'package:tosspayments_widget_sdk_flutter/model/payment_info.dart';
-import 'package:tosspayments_widget_sdk_flutter/model/payment_widget_options.dart';
-import 'package:tosspayments_widget_sdk_flutter/payment_widget.dart';
-import 'package:tosspayments_widget_sdk_flutter/widgets/agreement.dart';
-import 'package:tosspayments_widget_sdk_flutter/widgets/payment_method.dart';
+import 'dart:html' as html;
+import 'dart:js' as js;
+import '../utils/localization_data.dart';
 
 class PaymentScreen extends StatefulWidget {
   final String orderId;
   final String orderName;
   final int amount;
+  final String targetLanguage;
 
   const PaymentScreen({
     super.key,
     required this.orderId,
     required this.orderName,
     required this.amount,
+    this.targetLanguage = 'ko',
   });
 
   @override
@@ -23,151 +23,166 @@ class PaymentScreen extends StatefulWidget {
 
 class _PaymentScreenState extends State<PaymentScreen> {
   // ★ [테스트용 클라이언트 키]
-  // 실 서비스 배포 시에는 토스페이먼츠 개발자센터의 '라이브 클라이언트 키'로 교체해야 합니다.
-  final String _clientKey = "test_gck_docs_Ovk5rk1EwkEbP0W43n07xlzm"; 
+  final String _clientKey = "test_ck_6bJXmgo28e1oxJ4kwWzw8LAnGKWx";
   late String _customerKey;
-
-  late PaymentWidget _paymentWidget;
-  bool _isReady = false; // 위젯 렌더링 완료 상태
+  bool _isProcessing = false;
 
   @override
   void initState() {
     super.initState();
-    // 고객 식별 키 생성 (고유해야 함 / 실제 앱에서는 유저 ID 권장)
     _customerKey = "USER_${DateTime.now().millisecondsSinceEpoch}";
 
-    // 1. 위젯 인스턴스 생성
-    _paymentWidget = PaymentWidget(
-      clientKey: _clientKey,
-      customerKey: _customerKey,
-    );
-
-    // 2. UI 렌더링 시작
-    _renderWidgets();
+    // 화면이 로드되면 자동으로 결제 시작
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _requestPayment();
+      _setupPaymentResultListener();
+    });
   }
 
-  Future<void> _renderWidgets() async {
+  // ★ [추가] postMessage 이벤트 리스너 설정
+  void _setupPaymentResultListener() {
+    // URL 체크를 주기적으로 수행하여 결제 완료 감지
+    Future.delayed(const Duration(seconds: 1), () {
+      _checkPaymentStatus();
+    });
+  }
+
+  void _checkPaymentStatus() async {
     try {
-      // (1) 결제 수단 위젯 렌더링 (일반 결제)
-      // 정기결제(Billing) 로직을 제거하고, 넘어온 금액(amount)으로 고정합니다.
-      await _paymentWidget.renderPaymentMethods(
-        selector: 'methods',
-        amount: Amount(
-          value: widget.amount, 
-          currency: Currency.KRW, // 원화(KRW) 고정
-          country: "KR",
-        ),
-      );
+      // 현재 URL에서 쿼리 파라미터 체크
+      final currentUrl = html.window.location.href;
+      print('🔍 현재 URL 체크: $currentUrl');
 
-      // (2) 이용약관 위젯 렌더링
-      await _paymentWidget.renderAgreement(selector: 'agreement');
+      final uri = Uri.parse(currentUrl);
 
-      // (3) 준비 완료 상태 업데이트 (버튼 활성화용)
+      if (uri.queryParameters.containsKey('payment')) {
+        final paymentStatus = uri.queryParameters['payment'];
+        print('💰 payment 파라미터 발견: $paymentStatus');
+
+        if (paymentStatus == 'success') {
+          // 결제 성공!
+          final paymentKey = uri.queryParameters['paymentKey'] ?? '';
+          final orderId = uri.queryParameters['orderId'] ?? '';
+          final amountStr = uri.queryParameters['amount'] ?? '0';
+
+          print('✅ 결제 완료 감지! paymentKey=$paymentKey, orderId=$orderId, amount=$amountStr');
+
+          // HomeScreen으로 결과 반환
+          if (mounted) {
+            Navigator.pop(context, {
+              'success': true,
+              'paymentKey': paymentKey,
+              'orderId': orderId,
+              'amount': int.tryParse(amountStr) ?? 0,
+            });
+          }
+          return;
+        } else if (paymentStatus == 'fail') {
+          // 결제 실패
+          final errorMessage = uri.queryParameters['message'] ?? AppLocale.get(widget.targetLanguage, 'msg_payment_failed');
+
+          print('❌ 결제 실패: $errorMessage');
+
+          if (mounted) {
+            Navigator.pop(context, {
+              'success': false,
+              'message': errorMessage,
+            });
+          }
+          return;
+        }
+      } else {
+        print('⏳ payment 파라미터 없음, 1초 후 재시도...');
+      }
+
+      // 아직 결제 완료 안 됨 - 1초 후 다시 체크
       if (mounted) {
-        setState(() {
-          _isReady = true;
+        Future.delayed(const Duration(seconds: 1), () {
+          _checkPaymentStatus();
         });
       }
     } catch (e) {
-      print("위젯 렌더링 에러: $e");
+      print('❌ 결제 상태 체크 오류: $e');
+      // 오류 발생 시에도 계속 체크
+      if (mounted) {
+        Future.delayed(const Duration(seconds: 1), () {
+          _checkPaymentStatus();
+        });
+      }
     }
   }
 
-  Future<void> _requestPayment() async {
+  void _requestPayment() async {
+    if (_isProcessing) return;
+
+    setState(() {
+      _isProcessing = true;
+    });
+
     try {
-      // 결제 요청 (일반 결제)
-      final paymentResult = await _paymentWidget.requestPayment(
-        paymentInfo: PaymentInfo(
-          orderId: widget.orderId,
-          orderName: widget.orderName,
-        ),
-      );
+      // 현재 URL 가져오기
+      final currentUrl = html.window.location.href;
+      final baseUrl = currentUrl.split('#')[0].split('?')[0];
 
-      if (!mounted) return;
+      // 토스페이먼츠 V1 SDK 사용
+      final tossPayments = js.JsObject(js.context['TossPayments'], [_clientKey]);
 
-      // 성공 시 처리
-      if (paymentResult.success != null) {
-        final success = paymentResult.success!;
-        
-        // 이전 화면(ResultScreen/HomeScreen)으로 성공 데이터 전달
-        Navigator.pop(context, {
-          'success': true,
-          'paymentKey': success.paymentKey, // 결제 승인 키
-          'orderId': success.orderId,
-          'amount': success.amount,
-        });
+      tossPayments.callMethod('requestPayment', [
+        '카드', // 결제 수단
+        js.JsObject.jsify({
+          'amount': widget.amount,
+          'orderId': widget.orderId,
+          'orderName': widget.orderName,
+          'successUrl': '$baseUrl?payment=success#/home',
+          'failUrl': '$baseUrl?payment=fail#/home',
+        })
+      ]);
 
-      } else if (paymentResult.fail != null) {
-        // 실패 시 처리
-        final fail = paymentResult.fail!;
+    } catch (e) {
+      print('결제 요청 에러: $e');
+      if (mounted) {
         Navigator.pop(context, {
           'success': false,
-          'message': fail.errorMessage,
+          'message': '${AppLocale.get(widget.targetLanguage, 'msg_error')}: $e',
         });
       }
-    } catch (e) {
-      print("결제 요청 에러: $e");
-      // 예외 발생 시 창 닫기 또는 에러 메시지 표시
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final lang = widget.targetLanguage;
+
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text("결제하기"),
+        title: Text(AppLocale.get(lang, 'payment_title')),
         backgroundColor: Colors.white,
-        foregroundColor: Colors.black, // 글자색 검정
+        foregroundColor: Colors.black,
         elevation: 0,
       ),
-      body: SafeArea(
+      body: Center(
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Expanded(
-              // 토스 위젯이 들어갈 영역
-              child: ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                children: [
-                  PaymentMethodWidget(
-                    paymentWidget: _paymentWidget,
-                    selector: 'methods',
-                  ),
-                  const SizedBox(height: 20),
-                  AgreementWidget(
-                    paymentWidget: _paymentWidget,
-                    selector: 'agreement',
-                  ),
-                  const SizedBox(height: 20),
-                ],
+            const CircularProgressIndicator(
+              color: Color(0xFF3182F6),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              AppLocale.get(lang, 'payment_redirecting'),
+              style: TextStyle(
+                fontSize: 16,
+                color: Colors.grey[600],
               ),
             ),
-            // 하단 결제 버튼 영역
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: SizedBox(
-                width: double.infinity,
-                height: 54,
-                child: ElevatedButton(
-                  onPressed: _isReady ? _requestPayment : null,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF3182F6), // 토스 브랜드 컬러 (파랑)
-                    disabledBackgroundColor: Colors.grey[300], // 비활성 색상
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: Text(
-                    _isReady 
-                        ? "${widget.amount}원 결제하기" 
-                        : "로딩 중...",
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
+            const SizedBox(height: 12),
+            Text(
+              '${widget.amount}원',
+              style: const TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF2D3436),
               ),
             ),
           ],

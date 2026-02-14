@@ -1,4 +1,5 @@
 // lib/main.dart
+import 'dart:ui';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/date_symbol_data_local.dart';
@@ -6,6 +7,8 @@ import 'home_screen.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'screens/intro_screen.dart'; // ★ import 추가
 import 'services/notification_service.dart'; // import 추가
+import 'screens/payment_success_screen.dart'; // 결제 성공 화면
+import 'screens/payment_fail_screen.dart'; // 결제 실패 화면
 
 // 보안 인증서 무시
 class MyHttpOverrides extends HttpOverrides {
@@ -36,6 +39,14 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'SJ Project',
+      // ★★★ [여기 추가!] 마우스 드래그로도 스와이프가 되도록 허용 ★★★
+      scrollBehavior: const MaterialScrollBehavior().copyWith(
+        dragDevices: {
+          PointerDeviceKind.touch,
+          PointerDeviceKind.mouse, // 핵심: 마우스 허용
+          PointerDeviceKind.trackpad,
+        },
+      ),
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
@@ -51,9 +62,19 @@ class MyApp extends StatelessWidget {
         fontFamily: 'Pretendard',
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2D3436)),
         scaffoldBackgroundColor: const Color(0xFFF5F7FA),
+        textTheme: ThemeData.light().textTheme.apply(
+          fontFamily: 'Pretendard',
+        ),
       ),
 
-      home: const IntroScreen(),
+      // ★ 라우팅 추가
+      initialRoute: '/',
+      routes: {
+        '/': (context) => const IntroScreen(),
+        '/home': (context) => const HomeScreen(),
+        '/payment-success': (context) => const PaymentSuccessScreen(),
+        '/payment-fail': (context) => const PaymentFailScreen(),
+      },
     );
   }
 }
