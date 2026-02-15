@@ -99,7 +99,7 @@ class FiveElementsDiagram extends StatelessWidget {
 
           // 다이어그램 영역 (높이 확보)
           SizedBox(
-            height: 470, // ★ 380 -> 400 (원이 커졌으니 공간 더 확보)
+            height: 430, // ★ 380 -> 400 (원이 커졌으니 공간 더 확보)
             width: double.infinity,
             child: CustomPaint(
               painter: _PentagonPainter(displayElements),
